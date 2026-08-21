@@ -7,37 +7,62 @@ Bare-Metal Ultrasonic Ranging Node
 
 ## Purpose
 
-Briefly describe what this project is intended to build and why it is the first Frontier Mechatronics project.
+Build a bare-metal ultrasonic ranging node using an STM32F030R8 and an HC-SR04 sensor. The firmware will trigger a measurement, measure the returned echo pulse with a hardware timer, calculate distance, and report the result over UART.
 
-Keep this focused on both:
+This is the first Frontier Mechatronics project because it establishes the foundations needed for a home robotics lab: direct control of real hardware, safe electrical interfacing, deterministic timing, debugging through SWD, and verification with bench equipment.
 
-- the physical system being built
-- the embedded systems concepts the project is intended to teach
+The project is learning-first. Firmware will be written in C, built and orchestrated with Zig, and implemented with a minimal register-level approach. The project will avoid vendor HALs, code generators, RTOSes, and unnecessary abstractions so that startup, memory layout, peripheral configuration, and the build process are understood and owned by the project.
+
+Over time, these foundations will support a fleet of home robots and edge IoT sensor and processing nodes.
 
 ## Primary Learning Objectives
 
-List the concepts that should be understood by the end of the project.
+By the end of this project, the following concepts should be understood through implementation, debugging, and measurement:
 
-Suggested areas:
+- How an ARM Cortex-M0 starts after reset:
+  - vector table location and contents
+  - reset handler
+  - stack setup
+  - `.data` initialisation and `.bss` clearing
 
-- Cortex-M0 reset and startup behaviour
-- STM32 memory map
-- vector table
-- linker script
-- stack and runtime initialization
-- memory-mapped I/O
-- RCC / clock configuration
-- GPIO
-- hardware timers
-- interrupts
-- UART
-- pulse generation and pulse-width measurement
-- SWD debugging
-- ELF / binary inspection
-- oscilloscope-based verification
-- embedded C build and cross-compilation
-- Zig build system
-- CI for embedded firmware
+- How the STM32F030R8 is represented in firmware:
+  - flash and SRAM memory map
+  - peripheral memory regions
+  - CMSIS device definitions, used as register descriptions rather than as a framework
+  - linker script responsibilities and ELF layout
+
+- How a bare-metal C firmware image is built:
+  - cross-compilation for ARM Cortex-M0
+  - compiling C through the Zig toolchain
+  - linking, producing a binary image, and inspecting ELF and binary outputs
+  - treating compiler warnings as errors where practical
+
+- How to configure and use STM32 peripherals at register level:
+  - RCC clock enable and clock configuration
+  - GPIO input and output configuration
+  - UART transmit for host-visible output
+  - hardware timers for microsecond timing and input capture
+  - interrupt configuration and interrupt handlers
+
+- How the ultrasonic ranging system works:
+  - generating the HC-SR04 trigger pulse
+  - measuring the Echo pulse width
+  - converting pulse duration to distance
+  - handling timeout, out-of-range, and invalid-measurement conditions
+  - safely interfacing the sensor’s 5 V Echo output with 3.3 V MCU logic
+
+- How to debug and verify embedded hardware and firmware:
+  - flashing and debugging through SWD
+  - inspecting registers, memory, and program state in a debugger
+  - using UART logs during bring-up
+  - verifying timing and signal levels with an oscilloscope
+  - using a multimeter to check power and electrical connections
+
+- How to maintain a small embedded firmware project:
+  - organising startup, board, driver, and application code clearly
+  - keeping hardware-specific behaviour explicit and documented
+  - building the project reproducibly with Zig
+  - running firmware build and static checks in GitHub Actions
 
 ## Hardware
 
@@ -459,4 +484,3 @@ Useful things to record:
 - datasheet/reference-manual ambiguities
 - toolchain issues
 - design decisions worth preserving
-
