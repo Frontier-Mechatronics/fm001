@@ -91,29 +91,37 @@ By the end of this project, the following concepts should be understood through 
 
 ### Debug / Communications
 
-- Debug probe:
-- Debug interface:
-- UART adapter:
+- Debug probe: Onboard ST-LINK/V2-1
+- Debug interface: SWD
+- UART adapter: USB-to-TTL serial adapter, switchable 3.3 V / 5 V logic
 
 ### Bench Equipment
 
-- Oscilloscope:
-- Multimeter:
-- Bench power supply:
-- Other:
+- Oscilloscope: Siglent SDS1202X-E, 200 MHz
+- Multimeter: Brymen BM235
+- Bench power supply: Rigol DP932E programmable DC power supply
+- Other: 
+  - OWON HDS272S handheld oscilloscope, 70 MHz
+  - Weller WE1010 soldering station
 
 ## Software and Toolchain
 
 ### Host
 
 - Development machine:
-- Host OS:
-- Architecture:
+  - MacBook Pro
+  - Model Identifier: Mac16,5
+  - Chip: Apple M4 Max
+  - CPU: 16 cores (12 performance, 4 efficiency)
+  - Memory: 128 GB
+- Host OS: macOS
+- Architecture: arm64 (AArch64)
+
 
 ### Firmware
 
 - Language: C
-- Target architecture:
+- Target architecture: 
 - Runtime:
 - RTOS: None
 
@@ -126,9 +134,9 @@ By the end of this project, the following concepts should be understood through 
 
 ### Debug / Flash Tools
 
-- Debug server:
-- Debugger:
-- Flash mechanism:
+- Debug server: OpenOCD 0.12.0
+- Debugger: TBD
+- Flash mechanism: OpenOCD via ST-LINK over SWD
 
 ### CI
 
