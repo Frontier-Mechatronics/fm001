@@ -53,3 +53,11 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# Local build products and vendor documentation
+build/
+references/
+/docs/references/
+
+# macOS Finder metadata
+.DS_Store

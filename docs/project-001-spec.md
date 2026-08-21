@@ -11,7 +11,7 @@ Build a bare-metal ultrasonic ranging node using an STM32F030R8 and an HC-SR04 s
 
 This is the first Frontier Mechatronics project because it establishes the foundations needed for a home robotics lab: direct control of real hardware, safe electrical interfacing, deterministic timing, debugging through SWD, and verification with bench equipment.
 
-The project is learning-first. Firmware will be written in C, built and orchestrated with Zig, and implemented with a minimal register-level approach. The project will avoid vendor HALs, code generators, RTOSes, and unnecessary abstractions so that startup, memory layout, peripheral configuration, and the build process are understood and owned by the project.
+The project is learning-first. Firmware will be written in C, built with Clang/LLVM and GNU Make, and implemented with a minimal register-level approach. The project will avoid vendor HALs, code generators, RTOSes, and unnecessary abstractions so that startup, memory layout, peripheral configuration, and the build process are understood and owned by the project.
 
 Over time, these foundations will support a fleet of home robots and edge IoT sensor and processing nodes.
 
@@ -33,7 +33,7 @@ By the end of this project, the following concepts should be understood through 
 
 - How a bare-metal C firmware image is built:
   - cross-compilation for ARM Cortex-M0
-  - compiling C through the Zig toolchain
+  - compiling C with Clang/LLVM through GNU Make
   - linking, producing a binary image, and inspecting ELF and binary outputs
   - treating compiler warnings as errors where practical
 
@@ -49,7 +49,7 @@ By the end of this project, the following concepts should be understood through 
   - measuring the Echo pulse width
   - converting pulse duration to distance
   - handling timeout, out-of-range, and invalid-measurement conditions
-  - safely interfacing the sensor’s 5 V Echo output with 3.3 V MCU logic
+  - safely interfacing the sensor’s potentially 5 V Echo output with the selected MCU pin, after verifying that pin's electrical characteristics
 
 - How to debug and verify embedded hardware and firmware:
   - flashing and debugging through SWD
@@ -61,7 +61,7 @@ By the end of this project, the following concepts should be understood through 
 - How to maintain a small embedded firmware project:
   - organising startup, board, driver, and application code clearly
   - keeping hardware-specific behaviour explicit and documented
-  - building the project reproducibly with Zig
+  - building the project reproducibly with GNU Make
   - running firmware build and static checks in GitHub Actions
 
 ## Hardware
@@ -83,9 +83,9 @@ By the end of this project, the following concepts should be understood through 
 - Logic voltage: 5V TTL logic level
 - Important electrical constraints:
   - Working Current: Consumes up to 15mA during active sonic transmission.
-  - 3.3V System Incompatibility: Because the Echo pin outputs a full 5V logic signal, connecting it directly
-    to a 3.3V microcontroller (like your STM32 Nucleo board) will cause permanent over-voltage damage to the
-    MCU pin. You must use a series resistor voltage divider or a logic-level shifter on the Echo line to drop it safely to 3.3V.
+  - Echo interface safety: Treat Echo as a potentially 5 V output. Do not connect it directly to an MCU pin until the selected pin's
+    5 V-tolerance status and applicable electrical limits have been verified in the STM32F030 datasheet. The default interface should
+    use a resistor divider or logic-level shifter; any direct connection requires an explicit, documented electrical justification.
   - Triggering Pulse Requirement: The Trig pin requires a precise high-level TTL pulse lasting at least 10 microseconds
     to initialize a measurement cycle.
 
@@ -117,20 +117,21 @@ By the end of this project, the following concepts should be understood through 
 - Host OS: macOS
 - Architecture: arm64 (AArch64)
 
-
 ### Firmware
 
 - Language: C
-- Target architecture: 
-- Runtime:
+- Target architecture: Armv6-M / ARM Cortex-M0
+- Runtime: Freestanding bare-metal
 - RTOS: None
 
 ### Build System
 
-- Zig version:
-- Zig build system:
-- C compiler frontend:
-- Linker:
+- Build orchestration: GNU Make
+- C compiler frontend: Apple Clang 17.0.0
+- Target triple: arm-none-eabi
+- CPU target: cortex-m0
+- Instruction set: Thumb
+- Linker: TBD
 
 ### Debug / Flash Tools
 
@@ -256,7 +257,7 @@ Produce, inspect, flash and debug the smallest firmware image that executes our 
 
 Exit criteria:
 
-- Zig toolchain configured for the target
+- Clang/LLVM cross-compilation and GNU Make configured for the target
 - C source cross-compiles
 - custom linker script is used
 - vector table exists
@@ -446,7 +447,7 @@ Project 001 is complete when:
 - UART diagnostics work
 - HC-SR04 ranging works reliably
 - important timing has been independently verified with the oscilloscope
-- firmware can be built from a clean checkout using Zig
+- firmware can be built from a clean checkout using Clang/LLVM and GNU Make
 - CI builds and tests the project successfully
 - the project can be flashed and debugged through SWD
 - the repository contains sufficient documentation for the system to be reproduced later
@@ -472,12 +473,12 @@ Track decisions that have not yet been made.
 Initial examples:
 
 - exact STM32 pins for TRIG/ECHO
-- whether HC-SR04 ECHO requires external level shifting on the selected pin
+- whether the selected HC-SR04 ECHO pin permits a direct connection or requires external level shifting, based on verified STM32 electrical limits
 - exact system clock configuration
 - whether SysTick or a general-purpose timer is used for early timing exercises
 - whether the onboard or standalone ST-LINK is used initially
 - exact debug software stack on macOS
-- exact Zig version to pin for the project
+- exact linker choice and invocation for the Clang/LLVM + GNU Make build
 
 ## Engineering Log
 
