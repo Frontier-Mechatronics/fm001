@@ -123,6 +123,9 @@ correct Cortex-M0 image for FM001; that remains an open question to be answered 
 - Evidence toward the open linker question: `ld.lld` accepts GNU-style `MEMORY`/`SECTIONS` syntax and produces an
   ARM ELF for this target. Whether the produced image actually boots on hardware is not established here — the
   image has no vector table, so it cannot.
+- Superseded in part: the `0x10000` attribution above was an inference from one observed address when this entry
+  was written. It was tested directly on 2026-08-22 and confirmed. See "The 0x10000 orphan-placement jump is
+  confirmed to be lld's default max-page-size" below for the measurements and the segment-level mechanism.
 
 ## 2026-08-22 — The reset MSP value is read *from* address 0x00000000, not set *to* it
 
@@ -140,9 +143,14 @@ correct Cortex-M0 image for FM001; that remains an open question to be answered 
   Table 3 in the same section lists the MSP and PC reset values as "See description"; every other core
   register resets to a fixed constant or is Unknown. Those two are the only registers whose reset value
   comes from memory.
-- Interpretation: word 0 of the boot memory is *data* — a stack-pointer value — not an instruction. The
-  first executable word of an FM001 image is at offset 4, and its bit[0] must be 1 to keep the core in
-  Thumb state.
+- Interpretation: the first two words of the boot memory are both *data*, not instructions.
+  - Offset `0x00` is a stack-pointer value, loaded into MSP.
+  - Offset `0x04` is the reset vector: a 32-bit pointer to the reset handler, loaded into PC.
+  Bit[0] of the word at `0x04` is not part of the address. Per the quote above it is loaded into the EPSR
+  T-bit, and the address taken by PC is the value with bit[0] masked off. It must be 1 or the core leaves
+  reset out of Thumb state.
+  The first instruction actually executed is therefore at whatever address that pointer holds — wherever
+  the linker placed the reset handler. It is not at a fixed offset in the image.
 - Non-relocatable on this part: PM0215 Rev 2, section 2.3.4, states "On system reset, the vector table is
   fixed at address 0x00000000." Armv6-M on this device has no VTOR, so the table address cannot be moved
   at runtime. Combined with the 2026-08-22 boot-aliasing finding, this is why an image linked at
@@ -185,3 +193,41 @@ correct Cortex-M0 image for FM001; that remains an open question to be answered 
 - Consequence: defining the value and *storing* it at `ORIGIN(FLASH)` are two separate steps. The image
   still has no word at offset 0, so it still cannot boot. Emitting the word is the vector-table step.
 - Remaining warning, unchanged and expected: `cannot find entry symbol _start; not setting start address`.
+
+## 2026-08-22 — The 0x10000 orphan-placement jump is confirmed to be lld's default max-page-size
+
+Upgrades the 2026-08-22 orphan-placement finding. That entry attributed the jump to "lld's default ARM
+max-page-size of `0x10000`", which was an inference from a single observed address, not a measurement.
+Tested directly by varying the parameter and watching the address move.
+
+- Linker under test: `Homebrew LLD 20.1.3 (compatible with GNU linkers)`. The default below is a property of
+  this build, not a documented constant transcribed from a specification.
+- Script under test: a `MEMORY`-only script with no `SECTIONS`, reproducing the original failure.
+- Command form: `ld.lld -T <memonly.ld> build/main.o -o <out> -Map <map> [-z max-page-size=N]`
+
+| `max-page-size` | `.text` VMA | link result |
+|---|---|---|
+| default (unset) | `0x08010010` | fails: overflowed FLASH by 20 bytes |
+| `0x1000`        | `0x08001010` | succeeds |
+| `0x100`         | `0x08000110` | succeeds |
+
+`.ARM.exidx` stays at `0x08000000` size `0x10` in all three. The `.text` address tracks the parameter
+exactly, so the default is `0x10000`.
+
+- Mechanism confirmed from program headers of the `0x1000` link:
+
+  ```text
+  Type  Offset    VirtAddr    FileSiz  MemSiz   Flg  Align
+  LOAD  0x001000  0x08000000  0x00010  0x00010  R    0x1000    <- .ARM.exidx  (AL)
+  LOAD  0x001010  0x08001010  0x00004  0x00004  R E  0x1000    <- .text       (AX)
+  ```
+
+  Two distinct `PT_LOAD` segments because the section permissions differ — `.ARM.exidx` is `AL` (read-only),
+  `.text` is `AX` (read + execute). Each segment is aligned to `max-page-size`, and the file-offset remainder
+  is preserved: both `p_vaddr` and `p_offset` end in `0x010`.
+- Consequence: the original failure was caused entirely by that default. Two fixes were available —
+  `-z max-page-size=` on the link line, or naming `.text` in a `SECTIONS` block. FM001 uses the `SECTIONS`
+  block, which is the correct fix for a linker script that must control placement precisely, and which does
+  not depend on a linker-specific default staying the same across versions.
+- Scope limit: this establishes lld's behaviour and default. It says nothing about GNU `ld`, which is not
+  installed on this host and may use a different default.

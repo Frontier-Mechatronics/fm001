@@ -4,10 +4,15 @@
  * Step 2: place .text explicitly at the start of FLASH.
  * Step 3: define the initial stack-pointer value as a linker symbol.
  *
- * Step 2 exists because a MEMORY-only script left every input section orphaned. The linker
- * ordered .ARM.exidx first and then aligned the differently-permissioned .text to its default
- * 0x10000 segment boundary, landing 4 bytes of code at 0x08010010 — past the end of flash.
+ * Step 2 exists because a MEMORY-only script left every input section orphaned. Read-only
+ * .ARM.exidx and read+execute .text went into separate PT_LOAD segments, and lld aligned the
+ * second to max-page-size, landing 4 bytes of code at 0x08010010 — past the end of flash.
  * Naming .text here anchors it at ORIGIN(FLASH) and the orphans follow contiguously.
+ *
+ * The 0x10000 figure is measured, not cited: varying -z max-page-size moves .text to 0x08001010
+ * (0x1000) and 0x08000110 (0x100), so the default is 0x10000 for Homebrew LLD 20.1.3. Setting
+ * that flag would also have "fixed" the overflow; the SECTIONS block is preferred because it
+ * states placement explicitly instead of depending on a linker default. See discoveries.md.
  *
  * Step 3 defines _stack_top only. It emits no bytes: an assignment outside SECTIONS creates an
  * absolute symbol, which is an address the linker hands to other code, not storage in the image.
