@@ -97,3 +97,29 @@ correct Cortex-M0 image for FM001; that remains an open question to be answered 
 - Poppler 26.08.0 was installed via Homebrew on 2026-08-22, providing `pdftotext` and `pdftoppm`. Page rendering
   is therefore available, so figures, pinout diagrams, and schematic sheets can now be read directly rather than
   only as extracted text.
+
+## 2026-08-22 — ld.lld links a Cortex-M0 image; MEMORY alone does not control placement
+
+- Command: `ld.lld -T linker/stm32f030r8.ld build/main.o -o build/fm001.elf -Map build/fm001.map`
+- With a `MEMORY`-only script the link failed:
+  `ld.lld: error: section '.text' will not fit in region 'FLASH': overflowed by 20 bytes`
+- Cause, from `build/fm001.map`: `.text` is 4 bytes, so this was placement, not size. Every input section was
+  an orphan. lld ordered the read-only `.ARM.exidx` first at `0x08000000`, then placed the read+execute `.text`
+  in a new segment aligned to lld's default ARM max-page-size of `0x10000`, at `0x08010010`. Flash ends at
+  `0x08010000`, so the 4-byte section overran the region by 20 bytes (`0x14`).
+- Fix: naming `.text` in a `SECTIONS` block removes it from orphan handling and anchors it at `ORIGIN(FLASH)`:
+
+  ```text
+  SECTIONS
+  {
+    .text : { *(.text*) } > FLASH
+  }
+  ```
+
+- Result: link succeeds. `llvm-readelf -S build/fm001.elf` shows `.text` PROGBITS AX at `0x08000000` size 4,
+  with the `.ARM.exidx` orphan following contiguously at `0x08000004`.
+- Remaining warning, expected and not yet addressed: `cannot find entry symbol _start; not setting start address`.
+  No startup code and no `ENTRY()` directive exist yet.
+- Evidence toward the open linker question: `ld.lld` accepts GNU-style `MEMORY`/`SECTIONS` syntax and produces an
+  ARM ELF for this target. Whether the produced image actually boots on hardware is not established here — the
+  image has no vector table, so it cannot.

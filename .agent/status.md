@@ -18,17 +18,20 @@ Build up the first project-owned linker script one deliberate step at a time, th
 - The ST-LINK target-voltage reading during that test was approximately 3.25 V.
 - STM32F030R8T6 Flash and SRAM base addresses and sizes were confirmed against RM0360 Rev 5 and DS9773 Rev 5.
   See `discoveries.md` for the evidence and its limitations.
-- `linker/stm32f030r8.ld` exists and declares only a `MEMORY` block. It has not yet been used in a link,
-  so nothing about its effect on section placement has been observed.
+- `linker/stm32f030r8.ld` declares `MEMORY` plus a minimal `SECTIONS` block placing `.text` in FLASH.
+- `ld.lld` links `build/main.o` against that script and produces `build/fm001.elf` with `.text` at `0x08000000`.
+  The link emits one expected warning: no `_start` entry symbol. See `discoveries.md` for the orphan-placement
+  failure that made the `SECTIONS` block necessary.
 
 ## Next Intended Step
 
-Link `build/main.o` using `ld.lld -T linker/stm32f030r8.ld` and inspect the resulting ELF with `llvm-readelf -S -l`.
+Give the image a vector table. `build/fm001.elf` currently has `main` at the base of flash, so the first words of
+the boot memory are instructions rather than the initial stack pointer and reset vector. The device cannot start
+from it.
 
-The specific question this answers: with a script that supplies `MEMORY` but no `SECTIONS`, does the linker place
-`.text` into the FLASH region by orphan-section attribute matching, place it elsewhere, or refuse to link? This is
-also the first real evidence toward the open question of which linker FM001 uses. Record the observed behaviour
-rather than assuming it.
+Next, in order: define the initial stack pointer and reset handler, place the vector table at `ORIGIN(FLASH)`
+ahead of `.text`, and add `ENTRY()`. Confirm the required table layout and the minimum entry count from PM0215
+and RM0360 rather than from an example script.
 
 ## Current Toolchain
 
