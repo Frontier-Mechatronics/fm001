@@ -16,7 +16,7 @@ source cannot.
 | | |
 |---|---|
 | Date | 2026-08-22 |
-| Commit | `6dec92c`, plus the then-untracked `src/startup.c` |
+| Commit | `f4aba42` — the commit that added `src/startup.c` and this document |
 | Compiler | Apple clang version 17.0.0 (clang-1700.6.3.2) |
 | Linker | Homebrew LLD 20.1.3 |
 | Binutils | Homebrew LLVM 20.1.3 (`llvm-readelf`, `llvm-objdump`, `llvm-objcopy`, `llvm-readobj`) |
