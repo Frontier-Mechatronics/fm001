@@ -77,6 +77,38 @@ still useful, but the reader must know the referenced state was not yet permanen
 Tool versions belong in `repository.toolchain`, and only when relevant to the session. This is not an
 inventory; a linker session records the linker's version, not the whole machine.
 
+### Capture after committing
+
+Make the session's code and documentation commits first, then capture. The order is not cosmetic.
+
+`persistence: committed` means "tracked in this repository at the recorded commit, recoverable exactly."
+Capture with a dirty tree and that claim is false for the session's own files: they must be downgraded to
+`ephemeral`, discarding the strongest evidence class available. `repository.head_commit` has the same
+problem — captured early it names the state *before* the work, and `commits_created` is empty, so the trace
+describes something nothing it references can reach.
+
+The sequence:
+
+1. Commit the session's code and documentation changes.
+2. Capture. The trace records the real HEAD and the real commit SHAs.
+3. **Read the trace.** This is the gate that matters — after commit it is historical, and corrections
+   require a superseding trace.
+4. Commit the trace on its own.
+
+The trace therefore lands one commit after the work it describes. That is correct: it describes that commit,
+so it cannot precede it. Do not contort the workflow to get the trace and the code into a single commit —
+the durable link is the SHA recorded inside the trace, which survives rebases, cherry-picks, and file moves.
+Co-location in one commit does not.
+
+Two caveats:
+
+- **This must not become a reason to skip capture.** A session that produced no commits is still worth
+  capturing — exploratory work, reading primary documentation, an unresolved bring-up failure. Leave
+  `commits_created` empty, record `dirty: true` honestly, and mark evidence `reproducible` or `ephemeral`
+  as it actually is. The rule is to prefer committed evidence, not to refuse uncommitted work.
+- **Never commit code you would not otherwise commit** just to improve a trace's evidence. The work drives
+  the commits; the trace records them.
+
 ## 4. Distinguish evidence from recollection
 
 Every load-bearing statement in a trace falls into one of four categories, recorded in `claims[].status`:
