@@ -1,0 +1,250 @@
+{
+  "schema_version": "session-v1",
+  "trace_id": "EXAMPLE-2026-01-15T142200Z-linker-flash-overflow",
+  "example": true,
+  "created_at": "2026-01-15T14:22:00Z",
+  "title": "EXAMPLE — Linker FLASH overflow caused by orphan section alignment",
+  "summary": "Synthetic trace illustrating the session-v1 structure. Not a record of real work; commit SHAs and paths are placeholders. A 4-byte .text failed to fit in 64 KiB of flash because a MEMORY-only linker script left every section orphaned, and the linker aligned .text past the end of the region.",
+
+  "project": {
+    "name": "EXAMPLE-PROJECT",
+    "subsystem": "linker"
+  },
+
+  "agents": [
+    { "name": "engineer", "role": "human" },
+    { "name": "assistant", "role": "assistant", "provider": "example-provider", "model": "example-model" }
+  ],
+
+  "repository": {
+    "branch": "example/linker-bringup",
+    "head_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "dirty": true,
+    "changed_files": ["linker/example.ld"],
+    "untracked_files": [],
+    "toolchain": [
+      { "name": "clang", "version": "0.0.0-example", "notes": "--target=arm-none-eabi -mcpu=cortex-m0 -mthumb -ffreestanding" },
+      { "name": "ld.lld", "version": "0.0.0-example" }
+    ]
+  },
+
+  "hardware": [
+    { "identifier": "EXAMPLE-BOARD", "description": "Placeholder Cortex-M0 development board", "revision": "rev-X" }
+  ],
+
+  "objective": "Produce the smallest linker script that places code correctly in flash, starting from a script that declares only a MEMORY block.",
+
+  "activities": [
+    {
+      "summary": "Wrote a linker script containing only a MEMORY block declaring FLASH and SRAM.",
+      "kind": "implementation",
+      "files_changed": ["linker/example.ld"],
+      "evidence": ["ev-linker-script"]
+    },
+    {
+      "summary": "Attempted first link of a single object file against the MEMORY-only script.",
+      "kind": "experiment",
+      "commands": ["ld.lld -T linker/example.ld build/main.o -o build/example.elf"],
+      "outcome": "Link failed with a region overflow error.",
+      "evidence": ["ev-link-error"]
+    },
+    {
+      "summary": "Re-ran the link with -Map to obtain placement detail, then read the map file.",
+      "kind": "debugging",
+      "commands": ["ld.lld -T linker/example.ld build/main.o -o build/example.elf -Map build/example.map"],
+      "outcome": "Map showed .text placed at 0x08010010, past the end of the 64 KiB FLASH region.",
+      "evidence": ["ev-map-file"]
+    },
+    {
+      "summary": "Added a minimal SECTIONS block naming .text and assigning it to FLASH; relinked successfully.",
+      "kind": "implementation",
+      "files_changed": ["linker/example.ld"],
+      "outcome": "Link succeeded with .text at 0x08000000; one expected warning about a missing _start symbol remains.",
+      "evidence": ["ev-linker-script", "ev-readelf-sections"]
+    }
+  ],
+
+  "learning": {
+    "questions": [
+      {
+        "question": "Why does a 4-byte .text section not fit in a 64 KiB flash region?",
+        "origin": "user",
+        "answered": true,
+        "answer_summary": "It was a placement failure, not a size failure. The section was positioned beyond the region's end.",
+        "evidence": ["ev-map-file"]
+      },
+      {
+        "question": "Is a MEMORY block alone sufficient to control where code lands?",
+        "origin": "user",
+        "answered": true,
+        "answer_summary": "No. MEMORY declares available ranges; SECTIONS decides placement.",
+        "evidence": ["ev-map-file", "ev-readelf-sections"]
+      }
+    ],
+    "concepts": [
+      { "name": "Linker MEMORY regions", "exposure": "applied", "description": "Named address ranges with attributes, used for allocation decisions." },
+      { "name": "Orphan section placement", "exposure": "verified_by_experiment", "description": "Sections not named in SECTIONS are positioned by linker heuristics.", "evidence": ["ev-map-file"] },
+      { "name": "Load segment page alignment", "exposure": "explained", "description": "A new PT_LOAD segment is aligned to the linker's max-page-size, 0x10000 by default on this target.", "notes": "Explained during the session and consistent with observed addresses, but the default value itself was not independently confirmed against linker documentation." },
+      { "name": "VMA versus LMA", "exposure": "encountered", "description": "Runtime address versus stored-image address. Identical in this session because no .data section exists yet." }
+    ],
+    "observations": [
+      {
+        "statement": "Link failed with: section '.text' will not fit in region 'FLASH': overflowed by 20 bytes.",
+        "source": "command_output",
+        "evidence": ["ev-link-error"]
+      },
+      {
+        "statement": "Map file showed .ARM.exidx at 0x08000000 size 0x10, and .text at 0x08010010 size 0x4.",
+        "source": "command_output",
+        "evidence": ["ev-map-file"]
+      },
+      {
+        "statement": "After adding SECTIONS, readelf reported .text PROGBITS AX at 0x08000000 with .ARM.exidx following at 0x08000004.",
+        "source": "command_output",
+        "evidence": ["ev-readelf-sections"]
+      }
+    ],
+    "model_updates": [
+      {
+        "topic": "What a MEMORY block does",
+        "prior_model": "Declaring a FLASH region at ORIGIN 0x08000000 is enough to make code land there.",
+        "prior_model_provenance": "explicit",
+        "observation": "With only MEMORY declared, .text was placed at 0x08010010 — outside the declared region entirely.",
+        "updated_model": "MEMORY declares ranges available for allocation and their attributes. It does not position anything. Sections not named in a SECTIONS block are orphans, positioned by linker heuristics that may ignore the intended layout.",
+        "evidence": ["ev-map-file"],
+        "confidence": "high",
+        "still_uncertain": "Whether GNU ld orders orphan sections identically to lld."
+      },
+      {
+        "topic": "Interpreting a region overflow error",
+        "prior_model": "A 'will not fit' error means the content is too large for the region.",
+        "prior_model_provenance": "inferred",
+        "observation": "The overflowing section was 4 bytes and the region was 64 KiB.",
+        "updated_model": "The error reports that a section's end address exceeds the region's end address. That can be caused by size, but equally by placement. The map file distinguishes the two.",
+        "evidence": ["ev-link-error", "ev-map-file"],
+        "confidence": "high"
+      }
+    ],
+    "unresolved_questions": [
+      {
+        "question": "Does the linker place orphan sections deterministically across versions?",
+        "why_it_matters": "A layout that depends on heuristics is fragile; a toolchain upgrade could silently move sections.",
+        "blocked_on": "Not yet tested against a second linker or version."
+      },
+      {
+        "question": "Should .ARM.exidx be kept, placed explicitly, or discarded for a freestanding C build?",
+        "why_it_matters": "It consumes flash and currently relies on orphan placement.",
+        "blocked_on": "Requires deciding whether any unwinding support is wanted."
+      }
+    ],
+    "misconceptions": [
+      {
+        "misconception": "A successful link implies a bootable image.",
+        "held_by": "user",
+        "provenance": "explicit",
+        "corrected": true,
+        "correction": "The resulting image places main at the base of flash with no vector table, so the CPU would load an instruction word as its initial stack pointer. Linking success says nothing about boot correctness.",
+        "evidence": ["ev-readelf-sections"]
+      }
+    ]
+  },
+
+  "experiments": [
+    {
+      "id": "exp-memory-only-link",
+      "question": "With MEMORY declared but no SECTIONS, does the linker place .text into FLASH?",
+      "method": "Link one object file against a MEMORY-only script and inspect the generated map file.",
+      "commands": ["ld.lld -T linker/example.ld build/main.o -o build/example.elf -Map build/example.map"],
+      "predicted_result": "Attribute matching would place .text into the rx FLASH region at its origin.",
+      "observed_result": "The link failed. .ARM.exidx took 0x08000000 and .text was aligned into a new segment at 0x08010010.",
+      "conclusion": "Attribute matching selects a region but does not guarantee a usable address. Explicit placement is required.",
+      "status": "completed",
+      "evidence": ["ev-map-file", "ev-link-error"]
+    }
+  ],
+
+  "failures": [
+    {
+      "id": "fail-flash-overflow",
+      "observed": "ld.lld: error: section '.text' will not fit in region 'FLASH': overflowed by 20 bytes",
+      "hypotheses": [
+        { "statement": "The object file is larger than the flash region.", "status": "rejected", "reason": "readelf reported .text as 4 bytes." },
+        { "statement": "The region LENGTH was written incorrectly, e.g. 64K interpreted as something smaller.", "status": "rejected", "reason": "The map file showed placement above 0x08010000, consistent with a correct 64 KiB region." },
+        { "statement": "The section was placed outside the region rather than being too large for it.", "status": "supported", "reason": "Map file showed .text at 0x08010010, 16 bytes past the region end at 0x08010000." }
+      ],
+      "diagnostics": [
+        "Checked the size of .text in the input object with readelf -S.",
+        "Re-ran the link with -Map to obtain placement addresses.",
+        "Compared the reported .text address against ORIGIN + LENGTH of the FLASH region."
+      ],
+      "root_cause": "With no SECTIONS block, all sections were orphans. The read-only .ARM.exidx was placed first at the region origin; .text has different permissions, requiring a new load segment, which was aligned to the linker's default 0x10000 page size — exactly the end of a 64 KiB region.",
+      "resolution": "Added a SECTIONS block naming .text and assigning it to FLASH, anchoring it at the region origin and removing it from orphan handling.",
+      "resolved": true,
+      "evidence": ["ev-link-error", "ev-map-file", "ev-linker-script"],
+      "pedagogical_value": "The error text points at size while the cause is placement. A learner who trusts the message will try to shrink code that is already 4 bytes. It teaches reading the map file before believing the diagnostic."
+    }
+  ],
+
+  "claims": [
+    {
+      "id": "claim-placement-not-size",
+      "statement": "The overflow was caused by section placement, not by section size.",
+      "status": "observed",
+      "confidence": "high",
+      "evidence": ["ev-map-file", "ev-link-error"]
+    },
+    {
+      "id": "claim-page-align-default",
+      "statement": "The linker's default max-page-size on this target is 0x10000, which produced the 64 KiB placement jump.",
+      "status": "inferred",
+      "confidence": "medium",
+      "evidence": ["ev-map-file"],
+      "verification_required": "Confirm the default against linker documentation, or re-link with an explicit max-page-size and observe the address change."
+    },
+    {
+      "id": "claim-image-not-bootable",
+      "statement": "The linked image cannot boot, because flash begins with code rather than a vector table.",
+      "status": "inferred",
+      "confidence": "high",
+      "evidence": ["ev-readelf-sections"],
+      "verification_required": "Flash the image and observe the fault, or inspect the first eight bytes of the binary."
+    }
+  ],
+
+  "evidence": [
+    { "id": "ev-linker-script", "type": "linker_script", "persistence": "committed", "ref": "linker/example.ld", "description": "Placeholder script; MEMORY block, later a minimal SECTIONS block." },
+    { "id": "ev-link-error", "type": "command_output", "persistence": "reproducible", "ref": "ld.lld -T linker/example.ld build/main.o -o build/example.elf", "description": "Region overflow error text, quoted in full in the failure record." },
+    { "id": "ev-map-file", "type": "map_file", "persistence": "ephemeral", "ref": "build/example.map", "description": "Linker map showing .ARM.exidx at 0x08000000 and .text at 0x08010010. Gitignored build output; the decisive addresses are quoted in the observations so the finding survives the file.", "location": "first six lines", "captured_at": "2026-01-15T14:05:00Z" },
+    { "id": "ev-readelf-sections", "type": "command_output", "persistence": "reproducible", "ref": "llvm-readelf -S -l build/example.elf", "description": "Section and program headers after the SECTIONS fix." }
+  ],
+
+  "future_work": {
+    "experiments": [
+      { "idea": "Link the same object with GNU ld and compare orphan ordering and segment alignment.", "rationale": "Establishes whether the observed layout is linker-specific.", "prerequisites": ["A GNU Arm toolchain installed"] },
+      { "idea": "Re-link with an explicit max-page-size and observe whether .text moves.", "rationale": "Would convert claim-page-align-default from inferred to observed." }
+    ],
+    "course_topics": [
+      { "topic": "Reading a linker map file to diagnose placement", "rationale": "The failure was undiagnosable from the error text alone.", "level": "foundation", "related_concepts": ["Orphan section placement", "VMA versus LMA"] },
+      { "topic": "Why linking success does not imply a bootable image", "rationale": "Separates toolchain correctness from hardware correctness.", "level": "foundation" }
+    ],
+    "exercises": [
+      { "exercise": "Give the learner a MEMORY-only script and a failing link; ask them to explain why 4 bytes will not fit in 64 KiB.", "rationale": "Forces map-file reading rather than error-text trust.", "verification": "Learner identifies the 0x10000 alignment jump without being told about segments." }
+    ],
+    "useful_failures": [
+      { "failure_id": "fail-flash-overflow", "why_useful": "The diagnostic message actively misleads, which makes it a good exercise in not trusting error text." }
+    ],
+    "likely_misconceptions": [
+      { "misconception": "MEMORY regions position sections.", "why_likely": "The syntax names an ORIGIN, which reads as an instruction to place things there." },
+      { "misconception": "A 'will not fit' error always means the code is too big.", "why_likely": "The wording states size; nothing in it suggests placement." }
+    ],
+    "useful_artifacts": [
+      { "evidence_id": "ev-map-file", "why_useful": "A short map file where the misplacement is visible in six lines is a better teaching artifact than a realistic one." }
+    ],
+    "prerequisites": [
+      { "concept": "SECTIONS placement", "requires": ["MEMORY regions", "Output versus input sections"], "noticed_how": "The fix was only meaningful once the difference between declaring a range and placing content was clear." },
+      { "concept": "Startup code and .data initialisation", "requires": ["VMA versus LMA"], "noticed_how": "The two address columns in the map file have no purpose until a section exists whose load and run addresses differ." }
+    ]
+  },
+
+  "notes": "Synthetic trace written to demonstrate schema shape. Field coverage here is deliberately broad; a real trace should populate only what genuinely occurred."
+}
