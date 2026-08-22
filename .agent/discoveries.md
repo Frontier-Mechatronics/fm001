@@ -123,3 +123,65 @@ correct Cortex-M0 image for FM001; that remains an open question to be answered 
 - Evidence toward the open linker question: `ld.lld` accepts GNU-style `MEMORY`/`SECTIONS` syntax and produces an
   ARM ELF for this target. Whether the produced image actually boots on hardware is not established here — the
   image has no vector table, so it cannot.
+
+## 2026-08-22 — The reset MSP value is read *from* address 0x00000000, not set *to* it
+
+- Primary source: PM0215 Rev 2, section 2.1.3 "Core registers", page 6/72, under *Stack pointer (SP)
+  register R13*. As printed:
+
+  > 0: Main Stack Pointer (MSP)(reset value). On reset, the processor loads the MSP with the value from
+  > address 0x00000000.
+
+- Companion facts from the same section, page 7/72:
+
+  > On reset, the processor loads the PC with the value of the reset vector, which is at address
+  > 0x00000004. Bit[0] of the value is loaded into the EPSR T-bit at reset and must be 1.
+
+  Table 3 in the same section lists the MSP and PC reset values as "See description"; every other core
+  register resets to a fixed constant or is Unknown. Those two are the only registers whose reset value
+  comes from memory.
+- Interpretation: word 0 of the boot memory is *data* — a stack-pointer value — not an instruction. The
+  first executable word of an FM001 image is at offset 4, and its bit[0] must be 1 to keep the core in
+  Thumb state.
+- Non-relocatable on this part: PM0215 Rev 2, section 2.3.4, states "On system reset, the vector table is
+  fixed at address 0x00000000." Armv6-M on this device has no VTOR, so the table address cannot be moved
+  at runtime. Combined with the 2026-08-22 boot-aliasing finding, this is why an image linked at
+  `0x08000000` still boots: the core reads `0x00000000`, and ST aliases flash into that window.
+- Stack direction: PM0215 Rev 2, section 2.1.2 "Stacks", page 5/72: "The processor uses a full descending
+  stack. This means that the stack pointer indicates the last stacked item on the stack memory. When the
+  processor pushes a new item onto the stack, it decrements the stack pointer, and then writes the item to
+  the new memory location." The initial value is therefore one past the last usable byte, not the address
+  of the last usable word.
+
+## 2026-08-22 — A linker-script symbol outside SECTIONS is absolute and emits no bytes
+
+- Change under test: `_stack_top = ORIGIN(SRAM) + LENGTH(SRAM);` added to `linker/stm32f030r8.ld` at
+  top level, outside the `SECTIONS` block. Nothing in `src/main.c` references it.
+- Command: `ld.lld -T linker/stm32f030r8.ld build/main.o -o build/fm001.elf -Map build/fm001.map`
+- `ld.lld` evaluates `ORIGIN()` and `LENGTH()` arithmetic. `llvm-readelf -s build/fm001.elf`:
+
+  ```text
+     Num:    Value  Size Type    Bind   Vis       Ndx Name
+       4: 20002000     0 NOTYPE  GLOBAL DEFAULT   ABS _stack_top
+  ```
+
+  `Ndx ABS` — not tied to any output section. `Size 0` and `Type NOTYPE` — it is an address, not storage.
+- The value `0x20002000` is `0x20000000 + 0x2000`, the first address *outside* the 8 KB SRAM region. The
+  first push under a full descending stack writes to `0x20001FFC`, the last word inside SRAM. The value is
+  8-byte aligned, satisfying the AAPCS requirement on SP at a public interface.
+- The symbol emits nothing. `llvm-readelf -S` shows the same two allocated sections as before the change,
+  `.text` at `0x08000000` size 4 and `.ARM.exidx` at `0x08000004` size 0x10. `build/fm001.bin` regenerated
+  with `llvm-objcopy -O binary` is byte-identical to the pre-change binary — 20 bytes, MD5
+  `90c7062801e841ad5c604058eeec8e09` before and after.
+- `build/fm001.map` records the assignment with VMA, LMA and Size all zero:
+
+  ```text
+       VMA      LMA     Size Align Out     In      Symbol
+         0        0        0     1 _stack_top = ORIGIN(SRAM) + LENGTH(SRAM)
+  ```
+
+- An unreferenced absolute symbol defined in the script survives into `.symtab`; `ld.lld` did not discard
+  it. No `--gc-sections` was used, so this says nothing about behaviour under section garbage collection.
+- Consequence: defining the value and *storing* it at `ORIGIN(FLASH)` are two separate steps. The image
+  still has no word at offset 0, so it still cannot boot. Emitting the word is the vector-table step.
+- Remaining warning, unchanged and expected: `cannot find entry symbol _start; not setting start address`.

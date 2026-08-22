@@ -50,3 +50,27 @@ This is a chronological log. Record decisions when they are made; do not rewrite
 - Rationale: Local engineering PDFs should not be committed; the repository should remain lightweight and record stable document metadata and official URLs.
 - Alternatives considered: Committing PDFs is not the selected approach.
 - Consequences: `docs/references.md` records the authoritative document title, identifier, revision, date, official URL, and FM001 use.
+
+## 2026-08-22 — Stack-top symbol is `_stack_top`, defined by the linker script
+
+- Decision: The initial Main Stack Pointer value is defined in `linker/stm32f030r8.ld` as
+  `_stack_top = ORIGIN(SRAM) + LENGTH(SRAM);`, a plain assignment at top level, outside `SECTIONS`.
+- Rationale:
+  - Derived, not hard-coded. The address exists in exactly one place — the `MEMORY` block. Changing part
+    or region size cannot leave a stale stack pointer behind.
+  - Outside `SECTIONS` makes it an absolute (`ABS`) symbol rather than one bound to an output section. It
+    is an address handed to other code, not storage, and it emits no bytes into the image.
+  - Plain `=` rather than `PROVIDE()`. `PROVIDE` defines a symbol only when something references it and
+    nothing else defines it; a plain assignment always defines it, so the value is inspectable with
+    `llvm-readelf -s` before any code refers to it — which is the point of introducing it as its own step.
+  - The name is project-owned rather than adopted from a vendor template (ST/CubeMX uses `_estack`, GNU
+    newlib startup uses `__stack`). The leading underscore keeps it in the identifier space reserved to the
+    implementation, so it cannot collide with an application identifier.
+- Alternatives considered: `ORIGIN(SRAM) + LENGTH(SRAM)` is the whole of SRAM. Reserving a fixed stack
+  region and pointing the symbol at its top is the usual next refinement, and was deliberately deferred —
+  there is no `.data`, `.bss`, or heap to collide with yet, so a reservation now would encode a guess.
+- Consequences:
+  - The symbol alone does not make the image bootable. The core reads its MSP from a word at
+    `0x00000000`; nothing yet writes `_stack_top` into that word. Storing it is the vector-table step.
+  - Stack overflow on this part is silent. Cortex-M0 has no MPU and no stack-limit register, so growth
+    past `0x20000000` wraps out of SRAM rather than faulting. Detection, if wanted, must be built.

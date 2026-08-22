@@ -22,16 +22,21 @@ Build up the first project-owned linker script one deliberate step at a time, th
 - `ld.lld` links `build/main.o` against that script and produces `build/fm001.elf` with `.text` at `0x08000000`.
   The link emits one expected warning: no `_start` entry symbol. See `discoveries.md` for the orphan-placement
   failure that made the `SECTIONS` block necessary.
+- The linker script defines `_stack_top = ORIGIN(SRAM) + LENGTH(SRAM);`. `llvm-readelf -s build/fm001.elf`
+  reports it as `20002000  0  NOTYPE  GLOBAL  DEFAULT  ABS _stack_top`. Nothing references it yet and it emits
+  no bytes: `build/fm001.bin` is byte-identical before and after the change (20 bytes, MD5
+  `90c7062801e841ad5c604058eeec8e09`). PM0215 Rev 2 page 6/72 is the authority for what that value is for.
 
 ## Next Intended Step
 
-Give the image a vector table. `build/fm001.elf` currently has `main` at the base of flash, so the first words of
-the boot memory are instructions rather than the initial stack pointer and reset vector. The device cannot start
-from it.
+Give the image a vector table. `build/fm001.elf` still has `main` at the base of flash, so the first words of the
+boot memory are instructions rather than the initial stack pointer and reset vector. The device cannot start
+from it. `_stack_top` now names the correct value but nothing stores it at offset 0.
 
-Next, in order: define the initial stack pointer and reset handler, place the vector table at `ORIGIN(FLASH)`
-ahead of `.text`, and add `ENTRY()`. Confirm the required table layout and the minimum entry count from PM0215
-and RM0360 rather than from an example script.
+Next, in order: write a reset handler, emit a vector table whose first word is `_stack_top` and whose second word
+is the reset handler's address with bit[0] set, place that table at `ORIGIN(FLASH)` ahead of `.text`, and add
+`ENTRY()`. Confirm the required table layout and the minimum entry count from PM0215 and RM0360 rather than from
+an example script.
 
 ## Current Toolchain
 
@@ -56,6 +61,17 @@ clang \
   -ffreestanding \
   -c src/main.c \
   -o build/main.o
+
+ld.lld -T linker/stm32f030r8.ld build/main.o -o build/fm001.elf -Map build/fm001.map
+
+llvm-objcopy -O binary build/fm001.elf build/fm001.bin
+```
+
+Inspection commands used to check placement and symbols:
+
+```sh
+llvm-readelf -S build/fm001.elf   # section addresses and sizes
+llvm-readelf -s build/fm001.elf   # symbol table, including ABS linker-script symbols
 ```
 
 ## Current Repository Shape
@@ -64,13 +80,16 @@ clang \
 - `build/`: generated local objects; ignored by Git.
 - `docs/project-001-spec.md`: project specification.
 - `docs/references.md`: authoritative-reference metadata.
-- `linker/stm32f030r8.ld`: project-owned linker script. Currently declares only the `MEMORY` block, with `FLASH (rx)`
-  at `0x08000000` for 64K and `SRAM (rwx)` at `0x20000000` for 8K. No `ENTRY`, no `SECTIONS`, no symbol definitions yet.
+- `linker/stm32f030r8.ld`: project-owned linker script. Declares `MEMORY` with `FLASH (rx)` at `0x08000000` for 64K
+  and `SRAM (rwx)` at `0x20000000` for 8K; one absolute symbol assignment, `_stack_top`; and a `SECTIONS` block
+  placing `.text` in FLASH. No `ENTRY` and no vector-table output section yet.
 - `docs/references/`: local vendor PDFs; excluded from Git.
+- `.frontier/`: session-capture contract, schema, validator, and captured session traces.
 - `build.zig` is no longer present at the repository root.
-- No project-owned startup source, executable ELF, Makefile, or CI configuration has been observed.
-- Tracked by Git: `.agent/`, `AGENTS.md`, `.gitignore`, `LICENSE`, `README.md`, `docs/notes/20260821.md`,
-  `docs/project-001-spec.md`, `docs/references.md`, and `src/main.c`. `linker/` is untracked.
+- No project-owned startup source, Makefile, or CI configuration exists. `build/fm001.elf` is produced by hand
+  with the commands above and is not tracked.
+- Tracked by Git: `.agent/`, `.claude/`, `.codex/`, `.frontier/`, `AGENTS.md`, `.gitignore`, `.python-version`,
+  `LICENSE`, `README.md`, `docs/` (excluding `docs/references/`), `linker/`, and `src/`.
 
 ## Known Documentation Discrepancies
 
