@@ -1,0 +1,939 @@
+{
+  "schema_version": "session-v1",
+  "trace_id": "2026-08-22T095146Z-stack-top-symbol-and-reset-handler",
+  "created_at": "2026-08-22T19:51:46+10:00",
+  "title": "Initial stack pointer as a linker symbol, Reset_Handler, and reading build artifacts",
+  "summary": "Three deliberate steps on a bare-metal Cortex-M0 image that still has no vector table. Defined _stack_top from ORIGIN(SRAM) + LENGTH(SRAM) and confirmed it emits no bytes. Corrected two agent errors in previously committed prose after an external review relayed by the user, one factual and one about evidence status. Added src/startup.c defining Reset_Handler, then wrote a deep-dive document that runs each compile, link and inspect command and reads the real output. The session discharged two verification_required items left open by the prior trace.",
+  "project": {
+    "name": "FM001",
+    "repository_root": "/Users/elusivenode/Developer/frontier-mechatronics/fm001",
+    "remote": "git@github.com:Frontier-Mechatronics/fm001.git",
+    "subsystem": "startup"
+  },
+  "agents": [
+    {
+      "name": "elusivenode",
+      "role": "human"
+    },
+    {
+      "name": "Claude Code",
+      "role": "assistant",
+      "provider": "Anthropic",
+      "model": "claude-opus-5"
+    },
+    {
+      "name": "ChatGPT (comments relayed by the user, not present in the session)",
+      "role": "reviewer",
+      "provider": "OpenAI"
+    }
+  ],
+  "repository": {
+    "branch": "main",
+    "head_commit": "41d9e388997d0779439e5f690ef8dccc8af3eee4",
+    "dirty": false,
+    "commits_created": [
+      {
+        "sha": "57e97cc",
+        "subject": "_stack_top defined in linker script"
+      },
+      {
+        "sha": "6dec92c",
+        "subject": "Correct reset-vector wording; verify the lld max-page-size default"
+      },
+      {
+        "sha": "f4aba42",
+        "subject": "Add Reset_Handler and a deep dive on reading build artifacts"
+      },
+      {
+        "sha": "41d9e38",
+        "subject": "Pin the deep-dive provenance to its own commit"
+      }
+    ],
+    "toolchain": [
+      {
+        "name": "clang",
+        "version": "Apple clang 17.0.0 (clang-1700.6.3.2)",
+        "notes": "--target=arm-none-eabi -mcpu=cortex-m0 -mthumb -ffreestanding"
+      },
+      {
+        "name": "ld.lld",
+        "version": "Homebrew LLD 20.1.3",
+        "notes": "max-page-size default measured this session; the value is a property of this build"
+      },
+      {
+        "name": "llvm-readelf / llvm-objdump / llvm-objcopy / llvm-readobj",
+        "version": "Homebrew LLVM 20.1.3"
+      },
+      {
+        "name": "poppler pdftotext",
+        "version": "26.08.0",
+        "notes": "used to quote PM0215 text"
+      }
+    ]
+  },
+  "objective": "Introduce the initial stack-pointer value as a linker-defined symbol from ORIGIN(SRAM) + LENGTH(SRAM), after confirming the user's reading of PM0215 that the processor loads MSP from address 0x00000000 at reset. Then, as a separate smallest step, introduce a project-owned Reset_Handler and inspect it. No vector table in either step. Finally, document the compile/link/inspect commands as a walkthrough.",
+  "activities": [
+    {
+      "summary": "Confirmed the user's two stated readings against PM0215 before changing anything.",
+      "kind": "investigation",
+      "commands": [
+        "pdftotext -f 6 -l 8 docs/references/pm0215-...pdf -"
+      ],
+      "files_inspected": [
+        "docs/references/pm0215-stm32f0-series-cortexm0-programming-manual-stmicroelectronics.pdf"
+      ],
+      "outcome": "Both readings confirmed verbatim from pages 5/72, 6/72 and 7/72.",
+      "evidence": [
+        "ev-pm0215-msp",
+        "ev-pm0215-pc",
+        "ev-pm0215-stack"
+      ]
+    },
+    {
+      "summary": "Defined _stack_top as an absolute symbol outside SECTIONS in the linker script.",
+      "kind": "implementation",
+      "files_changed": [
+        "linker/stm32f030r8.ld"
+      ],
+      "outcome": "_stack_top resolves to 0x20002000, Ndx ABS, Size 0. The linked binary was byte-identical to before the change.",
+      "evidence": [
+        "ev-linker-script",
+        "ev-commit-stacktop"
+      ]
+    },
+    {
+      "summary": "Acted on two review comments relayed from ChatGPT about text committed in 57e97cc.",
+      "kind": "review",
+      "files_changed": [
+        ".agent/discoveries.md",
+        "linker/stm32f030r8.ld"
+      ],
+      "outcome": "One factual correction accepted and applied. The second comment challenged evidence quality rather than fact, so the claim was tested rather than reworded.",
+      "evidence": [
+        "ev-commit-correction",
+        "ev-discoveries"
+      ]
+    },
+    {
+      "summary": "Tested the lld max-page-size attribution by varying the parameter.",
+      "kind": "experiment",
+      "commands": [
+        "ld.lld -T <memonly.ld> build/main.o -o <out> -Map <map>",
+        "ld.lld -T <memonly.ld> build/main.o -o <out> -Map <map> -z max-page-size=0x1000",
+        "ld.lld -T <memonly.ld> build/main.o -o <out> -Map <map> -z max-page-size=0x100"
+      ],
+      "outcome": "The .text address tracked the parameter exactly, confirming the default is 0x10000 for this lld build.",
+      "evidence": [
+        "ev-cmd-maxpagesize"
+      ]
+    },
+    {
+      "summary": "Added src/startup.c defining Reset_Handler, compiled and linked it without changing the linker script.",
+      "kind": "implementation",
+      "commands": [
+        "clang --target=arm-none-eabi -mcpu=cortex-m0 -mthumb -ffreestanding -c src/startup.c -o build/startup.o",
+        "ld.lld -T linker/stm32f030r8.ld build/main.o build/startup.o -o build/fm001.elf -Map build/fm001.map"
+      ],
+      "files_changed": [
+        "src/startup.c"
+      ],
+      "outcome": "*(.text*) captured the new input section with no script change. .text grew from 4 to 16 bytes.",
+      "evidence": [
+        "ev-startup-c",
+        "ev-map-file",
+        "ev-commit-reset"
+      ]
+    },
+    {
+      "summary": "Inspected the object before linking and the executable after, comparing the two.",
+      "kind": "investigation",
+      "commands": [
+        "llvm-readelf -S build/startup.o",
+        "llvm-readelf -s build/startup.o",
+        "llvm-readelf -r build/startup.o",
+        "llvm-objdump -d build/startup.o",
+        "llvm-readelf -S build/fm001.elf",
+        "llvm-readelf -s build/fm001.elf",
+        "llvm-readelf -l build/fm001.elf",
+        "llvm-objdump -d --section=.text build/fm001.elf",
+        "llvm-objcopy -O binary build/fm001.elf build/fm001.bin",
+        "xxd build/fm001.bin",
+        "llvm-readobj --unwind build/fm001.elf"
+      ],
+      "files_inspected": [
+        "build/startup.o",
+        "build/fm001.elf",
+        "build/fm001.map",
+        "build/fm001.bin"
+      ],
+      "outcome": "Recorded the unresolved-to-resolved transition of the BL, the Thumb bit on function symbols, and that half the 32-byte image is .ARM.exidx.",
+      "evidence": [
+        "ev-obj-reloc",
+        "ev-symtab",
+        "ev-disasm",
+        "ev-bin-xxd",
+        "ev-unwind"
+      ]
+    },
+    {
+      "summary": "Wrote docs/deep-dives/learning-from-artifacts.md as a command-by-command walkthrough with real output.",
+      "kind": "documentation",
+      "files_changed": [
+        "docs/deep-dives/learning-from-artifacts.md"
+      ],
+      "outcome": "682-line document with a Provenance table and an explicit Unverified section.",
+      "evidence": [
+        "ev-deep-dive",
+        "ev-commit-reset",
+        "ev-commit-provenance"
+      ]
+    },
+    {
+      "summary": "Deferred the PSR register discussion after the user asked whether it was due.",
+      "kind": "decision",
+      "outcome": "Deferred APSR/IPSR and the MRS/MSR combination access; pulled only the EPSR T-bit forward, since the vector-table step depends on it and EPSR cannot be read by application software anyway.",
+      "evidence": [
+        "ev-pm0215-epsr"
+      ]
+    }
+  ],
+  "learning": {
+    "questions": [
+      {
+        "question": "On reset, does the processor load MSP with the value from address 0x00000000?",
+        "origin": "user",
+        "answered": true,
+        "answer_summary": "Yes. PM0215 Rev 2 page 6/72 states it verbatim. The value is read from that address; MSP is not set to that address.",
+        "evidence": [
+          "ev-pm0215-msp"
+        ]
+      },
+      {
+        "question": "Should the stack-top symbol be derived from ORIGIN(SRAM) + LENGTH(SRAM)?",
+        "origin": "user",
+        "answered": true,
+        "answer_summary": "Yes. The full descending stack means the initial value is one past the last usable byte. 0x20002000 is also 8-byte aligned as AAPCS requires.",
+        "evidence": [
+          "ev-pm0215-stack"
+        ]
+      },
+      {
+        "question": "What address does Reset_Handler have, and why does it have bit 0 set?",
+        "origin": "user",
+        "answered": true,
+        "answer_summary": "Symbol value 0x08000005; first instruction 0x08000004. Bit 0 encodes instruction-set state, not address, and is loaded into the EPSR T-bit by BX/BLX/POP{PC}.",
+        "evidence": [
+          "ev-symtab",
+          "ev-disasm"
+        ]
+      },
+      {
+        "question": "Did the existing *(.text*) selector capture Reset_Handler automatically?",
+        "origin": "user",
+        "answered": true,
+        "answer_summary": "Yes. build/fm001.map shows build/startup.o:(.text) under .text with no linker-script change.",
+        "evidence": [
+          "ev-map-file"
+        ]
+      },
+      {
+        "question": "Is it time to discuss PSR register combinations, or should that wait?",
+        "origin": "user",
+        "answered": true,
+        "answer_summary": "Deferred. Only the EPSR T-bit is load-bearing for the next step, and EPSR reads as zero from application software, so the MRS/MSR combination access is not yet usable.",
+        "evidence": [
+          "ev-pm0215-epsr"
+        ]
+      }
+    ],
+    "concepts": [
+      {
+        "name": "Initial MSP load from the vector table",
+        "exposure": "applied",
+        "description": "The core reads word 0 of the boot memory into MSP at reset.",
+        "evidence": [
+          "ev-pm0215-msp",
+          "ev-linker-script"
+        ]
+      },
+      {
+        "name": "Full descending stack",
+        "exposure": "explained",
+        "description": "Push decrements SP then writes, so the initial value is one past the last usable byte.",
+        "evidence": [
+          "ev-pm0215-stack"
+        ]
+      },
+      {
+        "name": "Linker-script absolute symbol",
+        "exposure": "applied",
+        "description": "An assignment outside SECTIONS creates an ABS symbol that emits no bytes.",
+        "evidence": [
+          "ev-symtab",
+          "ev-linker-script"
+        ]
+      },
+      {
+        "name": "ARM/Thumb interworking bit 0",
+        "exposure": "explained",
+        "description": "Bit 0 of a function pointer selects instruction set and loads into the EPSR T-bit.",
+        "evidence": [
+          "ev-symtab",
+          "ev-disasm"
+        ]
+      },
+      {
+        "name": "ELF relocation (R_ARM_THM_CALL)",
+        "exposure": "explained",
+        "description": "The compiler emits a placeholder branch and a relocation; the linker patches the encoding.",
+        "evidence": [
+          "ev-obj-reloc",
+          "ev-disasm"
+        ]
+      },
+      {
+        "name": "Sections versus segments",
+        "exposure": "explained",
+        "description": "Sections are the link-time view; PT_LOAD segments are what a loader sees, split by permission and aligned to max-page-size.",
+        "evidence": [
+          "ev-readelf-segments"
+        ]
+      },
+      {
+        "name": "Orphan placement and max-page-size",
+        "exposure": "applied",
+        "description": "Differing section permissions produce separate PT_LOAD segments, each aligned to the linker's max-page-size default.",
+        "evidence": [
+          "ev-cmd-maxpagesize",
+          "ev-readelf-segments"
+        ]
+      },
+      {
+        "name": "ARM exception index tables (.ARM.exidx)",
+        "exposure": "encountered",
+        "description": "Unwind metadata emitted by default; occupies half the current image.",
+        "evidence": [
+          "ev-unwind",
+          "ev-bin-xxd"
+        ]
+      }
+    ],
+    "observations": [
+      {
+        "statement": "PM0215 Rev 2 page 6/72: 'On reset, the processor loads the MSP with the value from address 0x00000000.'",
+        "source": "document",
+        "evidence": [
+          "ev-pm0215-msp"
+        ]
+      },
+      {
+        "statement": "PM0215 Rev 2 page 7/72: 'On reset, the processor loads the PC with the value of the reset vector, which is at address 0x00000004. Bit[0] of the value is loaded into the EPSR T-bit at reset and must be 1.'",
+        "source": "document",
+        "evidence": [
+          "ev-pm0215-pc"
+        ]
+      },
+      {
+        "statement": "PM0215 Rev 2 page 8/72: 'Attempts to read the EPSR directly through application software using the MSR instruction always return zero.'",
+        "source": "document",
+        "evidence": [
+          "ev-pm0215-epsr"
+        ]
+      },
+      {
+        "statement": "llvm-readelf -s reports '7: 20002000 0 NOTYPE GLOBAL DEFAULT ABS _stack_top'. build/fm001.bin was byte-identical before and after the symbol was added: 20 bytes, MD5 90c7062801e841ad5c604058eeec8e09.",
+        "source": "command_output",
+        "evidence": [
+          "ev-symtab"
+        ]
+      },
+      {
+        "statement": "llvm-readelf -s on the linked image reports '5: 08000001 4 FUNC GLOBAL DEFAULT 1 main' and '6: 08000005 12 FUNC GLOBAL DEFAULT 1 Reset_Handler', while the $t mapping symbols at the same locations are even: '2: 08000000' and '4: 08000004'.",
+        "source": "command_output",
+        "evidence": [
+          "ev-symtab"
+        ]
+      },
+      {
+        "statement": "llvm-objdump -d shows '08000004 <Reset_Handler>: 8000004: b580 push {r7, lr}' — the first instruction on the reset path is a store through SP.",
+        "source": "command_output",
+        "evidence": [
+          "ev-disasm"
+        ]
+      },
+      {
+        "statement": "The BL encoding changed from 'f7ff fffe' (branch to self, unresolved) in build/startup.o to 'f7ff fffa' targeting 0x08000000 after linking. The target is even; the linker masked bit 0 from the symbol value.",
+        "source": "command_output",
+        "evidence": [
+          "ev-obj-reloc",
+          "ev-disasm"
+        ]
+      },
+      {
+        "statement": "build/fm001.map contains ' 8000000  8000000        4     4         build/main.o:(.text)' and ' 8000004  8000004        c     4         build/startup.o:(.text)' under the .text output section.",
+        "source": "command_output",
+        "evidence": [
+          "ev-map-file"
+        ]
+      },
+      {
+        "statement": "Varying max-page-size moved .text: default 0x08010010 (link fails, overflows FLASH by 20 bytes), 0x1000 gives 0x08001010 (link succeeds), 0x100 gives 0x08000110 (link succeeds).",
+        "source": "command_output",
+        "evidence": [
+          "ev-cmd-maxpagesize"
+        ]
+      },
+      {
+        "statement": "llvm-readelf -l on the max-page-size=0x1000 link shows two PT_LOAD segments: '.ARM.exidx' flagged R and '.text' flagged R E, both Align 0x1000, with p_vaddr and p_offset both ending 0x010.",
+        "source": "command_output",
+        "evidence": [
+          "ev-readelf-segments"
+        ]
+      },
+      {
+        "statement": "xxd build/fm001.bin shows '00000000: ffe7 fee7 80b5 00af fff7 faff ffe7 fee7' — instructions occupying the words where the initial stack pointer and reset vector must go. The file is 32 bytes while .text is 16.",
+        "source": "command_output",
+        "evidence": [
+          "ev-bin-xxd"
+        ]
+      },
+      {
+        "statement": "llvm-readobj --unwind reports two entries for two functions: FunctionAddress 0x8000000 CantUnwind, and FunctionAddress 0x8000010 CantUnwind. 0x08000010 is one past the end of .text, not Reset_Handler at 0x08000004. Linking main.o alone also produced a 0x10-byte .ARM.exidx with one real entry and a trailing entry at 0x08000004, the end of .text in that link.",
+        "source": "command_output",
+        "evidence": [
+          "ev-unwind"
+        ]
+      }
+    ],
+    "model_updates": [],
+    "unresolved_questions": [
+      {
+        "question": "Does GNU ld use the same max-page-size default as lld on this target?",
+        "why_it_matters": "The linker for FM001 has not been formally selected. If the defaults differ, a script that relies on one linker's behaviour is not portable.",
+        "blocked_on": "No GNU Arm embedded toolchain is installed on this host.",
+        "evidence": [
+          "ev-cmd-maxpagesize"
+        ]
+      },
+      {
+        "question": "Is the single .ARM.exidx entry for two functions the result of coalescing adjacent identical CantUnwind entries?",
+        "why_it_matters": "The explanation is currently inferred from size invariance and sentinel position. If wrong, the reasoning in the deep-dive document is wrong.",
+        "blocked_on": "Checking LLD source or the ARM EHABI specification, or constructing a test with functions of differing unwind models to force the non-merging case.",
+        "evidence": [
+          "ev-unwind"
+        ]
+      },
+      {
+        "question": "Should _stack_top point at a bounded stack region rather than at the top of all SRAM?",
+        "why_it_matters": "Cortex-M0 has no MPU and no stack-limit register, so overflow past 0x20000000 is silent. A reservation would make the boundary explicit.",
+        "blocked_on": "No .data or .bss sections exist yet, so any reservation now would encode a guess.",
+        "evidence": [
+          "ev-linker-script"
+        ]
+      },
+      {
+        "question": "Is docs/deep-dives/ intended as a general home for artifact walkthroughs, or does it hold this one file?",
+        "why_it_matters": "Determines how .agent/status.md should describe it and whether future documents follow the pattern.",
+        "blocked_on": "User decision; asked during the session and not answered."
+      },
+      {
+        "question": "Does the image actually fail to boot on hardware in the way PM0215 implies?",
+        "why_it_matters": "Every claim in this session about boot behaviour is derived from documentation and byte content, never observed on the device.",
+        "blocked_on": "No firmware has been programmed to the NUCLEO-F030R8 in any session so far."
+      }
+    ],
+    "misconceptions": [
+      {
+        "misconception": "The first executable word of an FM001 image is at offset 4.",
+        "held_by": "agent",
+        "provenance": "explicit",
+        "corrected": true,
+        "correction": "Offset 0x04 holds a 32-bit pointer to the reset handler, not an instruction. Both of the first two words are data. Bit 0 of that pointer is not an address bit; it loads into the EPSR T-bit, and the address taken by PC is the value with bit 0 masked. The first instruction executed is wherever the linker placed the handler, which is not a fixed offset. Surfaced by an external review relayed by the user, and corrected in 6dec92c.",
+        "evidence": [
+          "ev-commit-stacktop",
+          "ev-commit-correction",
+          "ev-pm0215-pc"
+        ]
+      },
+      {
+        "misconception": "That lld's 0x10000 default max-page-size caused the earlier orphan-placement overflow was written into .agent/discoveries.md as established fact, when it was an inference drawn from a single observed address.",
+        "held_by": "agent",
+        "provenance": "explicit",
+        "corrected": true,
+        "correction": "The attribution itself was correct and is now measured rather than inferred: varying -z max-page-size moved .text proportionally, and the value is scoped to Homebrew LLD 20.1.3 rather than cited as a documented constant. The error was in evidence status, not in fact. Note that the prior session's trace had correctly recorded this as status 'inferred' with verification_required 'Confirm the default in lld documentation, or re-link with an explicit max-page-size and observe whether .text moves' — the overstatement was in the prose summary, not in the trace.",
+        "evidence": [
+          "ev-cmd-maxpagesize",
+          "ev-prior-trace",
+          "ev-commit-correction"
+        ]
+      }
+    ]
+  },
+  "experiments": [
+    {
+      "id": "exp-stack-top-emits-nothing",
+      "question": "Does a linker-script symbol assignment outside SECTIONS emit any bytes into the image?",
+      "method": "Add _stack_top to the linker script, relink, regenerate the flat binary, and compare it against the pre-change binary by MD5.",
+      "commands": [
+        "ld.lld -T linker/stm32f030r8.ld build/main.o -o build/fm001.elf -Map build/fm001.map",
+        "llvm-objcopy -O binary build/fm001.elf build/fm001.bin",
+        "md5 build/fm001.bin"
+      ],
+      "predicted_result": "No bytes emitted; the binary should be unchanged. Stated in the linker-script comment before the comparison was run.",
+      "observed_result": "build/fm001.bin identical before and after: 20 bytes, MD5 90c7062801e841ad5c604058eeec8e09. The symbol appears as Ndx ABS, Size 0, and the map records the assignment with VMA, LMA and Size all zero.",
+      "conclusion": "Defining the value and storing it at ORIGIN(FLASH) are separate steps. The image still has no word at offset 0.",
+      "status": "completed",
+      "evidence": [
+        "ev-symtab",
+        "ev-map-file"
+      ]
+    },
+    {
+      "id": "exp-max-page-size",
+      "question": "Is the 0x10000 placement jump in the earlier orphan failure caused by lld's default max-page-size?",
+      "method": "Reproduce the failure with a MEMORY-only script, then relink with explicit -z max-page-size values and observe whether the .text address tracks the parameter.",
+      "commands": [
+        "ld.lld -T <memonly.ld> build/main.o -o <out> -Map <map>",
+        "ld.lld -T <memonly.ld> build/main.o -o <out> -Map <map> -z max-page-size=0x1000",
+        "ld.lld -T <memonly.ld> build/main.o -o <out> -Map <map> -z max-page-size=0x100",
+        "llvm-readelf -l <out>"
+      ],
+      "predicted_result": "Recorded in the prior session's trace as verification_required: re-link with an explicit max-page-size and observe whether .text moves.",
+      "observed_result": "Default: .text at 0x08010010, link fails overflowing FLASH by 20 bytes. 0x1000: 0x08001010, link succeeds. 0x100: 0x08000110, link succeeds. Program headers show two PT_LOAD segments split by permission (.ARM.exidx R, .text R E), each aligned to max-page-size, with the file-offset remainder preserved.",
+      "conclusion": "The default is 0x10000 for Homebrew LLD 20.1.3. The overflow was caused entirely by that default; smaller page sizes also make the link succeed, so the SECTIONS block is the preferred fix for not depending on a linker default rather than because nothing else would link.",
+      "status": "completed",
+      "evidence": [
+        "ev-cmd-maxpagesize",
+        "ev-readelf-segments",
+        "ev-prior-trace"
+      ]
+    },
+    {
+      "id": "exp-link-order",
+      "question": "What determines the placement of main and Reset_Handler within .text?",
+      "method": "Relink with the two object files in the reverse order and compare the map and symbol table.",
+      "commands": [
+        "ld.lld -T linker/stm32f030r8.ld build/startup.o build/main.o -o /tmp/flip.elf -Map /tmp/flip.map"
+      ],
+      "observed_result": "Layout reversed: Reset_Handler at 0x08000001 with instructions at 0x08000000, main at 0x0800000d. Original order gives main at 0x08000001 and Reset_Handler at 0x08000005.",
+      "conclusion": "Placement inside *(.text*) is link command-line order. Nothing marks the reset handler as special or deserving a low address.",
+      "status": "completed",
+      "evidence": [
+        "ev-map-file",
+        "ev-symtab"
+      ]
+    },
+    {
+      "id": "exp-exidx-entry-count",
+      "question": "Why does .ARM.exidx contain only one real entry when the image has two functions?",
+      "method": "Decode the unwind table, then link main.o alone and compare entry count, section size, and the address of the trailing entry.",
+      "commands": [
+        "llvm-readobj --unwind build/fm001.elf",
+        "ld.lld -T linker/stm32f030r8.ld build/main.o -o <out>",
+        "llvm-readelf -S <out>",
+        "llvm-readobj --unwind <out>"
+      ],
+      "observed_result": "Both links produce a 0x10-byte .ARM.exidx with one real CantUnwind entry plus a trailing entry. The trailing entry tracks the end of .text exactly in each case: 0x08000004 for the one-function link, 0x08000010 for the two-function link. Adding a function did not grow the section.",
+      "conclusion": "The trailing entry is a sentinel and the adjacent identical CantUnwind entries were coalesced. The observations are firm; the coalescing mechanism is inferred and recorded as unresolved.",
+      "status": "completed",
+      "evidence": [
+        "ev-unwind"
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "claim-msp-from-address-zero",
+      "statement": "On reset the Cortex-M0 loads MSP with the 32-bit value stored at address 0x00000000; it does not set MSP to that address.",
+      "status": "observed",
+      "confidence": "high",
+      "evidence": [
+        "ev-pm0215-msp"
+      ]
+    },
+    {
+      "id": "claim-stack-top-value",
+      "statement": "_stack_top resolves to 0x20002000, is an absolute symbol of size 0, and emits no bytes into the image.",
+      "status": "observed",
+      "confidence": "high",
+      "evidence": [
+        "ev-symtab",
+        "ev-map-file"
+      ]
+    },
+    {
+      "id": "claim-thumb-bit-is-state",
+      "statement": "Bit 0 of a Thumb function symbol encodes instruction-set state rather than address. Reset_Handler reports 0x08000005 while its first instruction is at 0x08000004, and the $t mapping symbol at the same location is even.",
+      "status": "observed",
+      "confidence": "high",
+      "evidence": [
+        "ev-symtab",
+        "ev-disasm"
+      ]
+    },
+    {
+      "id": "claim-linker-masks-bit-zero",
+      "statement": "The linker masks bit 0 from the symbol value when resolving R_ARM_THM_CALL: the BL encoding becomes f7ff fffa targeting the even address 0x08000000.",
+      "status": "observed",
+      "confidence": "high",
+      "evidence": [
+        "ev-obj-reloc",
+        "ev-disasm"
+      ]
+    },
+    {
+      "id": "claim-text-glob-captures-startup",
+      "statement": "The existing *(.text*) selector captured startup.o's plain .text input section with no linker-script change.",
+      "status": "observed",
+      "confidence": "high",
+      "evidence": [
+        "ev-map-file"
+      ]
+    },
+    {
+      "id": "claim-placement-is-link-order",
+      "statement": "Placement of functions within the .text output section is determined by the order of object files on the link command line.",
+      "status": "observed",
+      "confidence": "high",
+      "evidence": [
+        "ev-map-file",
+        "ev-symtab"
+      ]
+    },
+    {
+      "id": "claim-max-page-size-default",
+      "statement": "Homebrew LLD 20.1.3's default max-page-size for this target is 0x10000, and that default alone caused the earlier orphan-placement FLASH overflow.",
+      "status": "observed",
+      "confidence": "high",
+      "evidence": [
+        "ev-cmd-maxpagesize",
+        "ev-readelf-segments"
+      ]
+    },
+    {
+      "id": "claim-reset-handler-uses-stack",
+      "statement": "Reset_Handler's first instruction is 'push {r7, lr}', so a valid MSP is a precondition for it executing at all.",
+      "status": "observed",
+      "confidence": "high",
+      "evidence": [
+        "ev-disasm"
+      ]
+    },
+    {
+      "id": "claim-image-half-unwind",
+      "statement": "build/fm001.bin is 32 bytes of which 16 are .ARM.exidx unwind metadata for unused C++ exception support.",
+      "status": "observed",
+      "confidence": "high",
+      "evidence": [
+        "ev-bin-xxd",
+        "ev-unwind"
+      ]
+    },
+    {
+      "id": "claim-exidx-coalesced",
+      "statement": "The single real .ARM.exidx entry for two functions results from coalescing adjacent identical CantUnwind entries, with the trailing entry acting as a sentinel.",
+      "status": "inferred",
+      "confidence": "medium",
+      "evidence": [
+        "ev-unwind"
+      ],
+      "verification_required": "Check LLD source or the ARM EHABI specification, or link two functions with differing unwind models and observe whether the entry count grows."
+    },
+    {
+      "id": "claim-not-bootable-bytes",
+      "statement": "The first eight bytes of build/fm001.bin are 'ff e7 fe e7 80 b5 00 af' — instructions occupying the words that must hold the initial stack pointer and reset vector, so the image cannot boot.",
+      "status": "inferred",
+      "confidence": "high",
+      "evidence": [
+        "ev-bin-xxd",
+        "ev-pm0215-msp",
+        "ev-pm0215-pc"
+      ],
+      "verification_required": "The byte content is observed; that the device faults as a result is not. Program the image to the NUCLEO-F030R8 and observe the fault under OpenOCD. This discharges the byte-inspection half of claim-not-bootable in the prior trace."
+    },
+    {
+      "id": "claim-function-sections-needed",
+      "statement": "The compiler emitted a plain .text input section rather than .text.Reset_Handler, so --gc-sections cannot discard individual unused functions as the build is currently configured.",
+      "status": "inferred",
+      "confidence": "high",
+      "evidence": [
+        "ev-obj-sections"
+      ],
+      "verification_required": "Rebuild with -ffunction-sections and confirm the section name changes, then link with --gc-sections and observe whether an unused function is removed."
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-pm0215-msp",
+      "type": "document",
+      "persistence": "external",
+      "ref": "PM0215, STM32F0 series Cortex-M0 programming manual, STMicroelectronics",
+      "revision": "Rev 2, February 2023",
+      "location": "page 6/72, section 2.1.3 Core registers",
+      "description": "Stack pointer (SP) register R13: 'On reset, the processor loads the MSP with the value from address 0x00000000.'"
+    },
+    {
+      "id": "ev-pm0215-pc",
+      "type": "document",
+      "persistence": "external",
+      "ref": "PM0215, STM32F0 series Cortex-M0 programming manual, STMicroelectronics",
+      "revision": "Rev 2, February 2023",
+      "location": "page 7/72, section 2.1.3",
+      "description": "PC reset value comes from the reset vector at 0x00000004; bit[0] loads into the EPSR T-bit and must be 1. Also records LR = 0xFFFFFFFF at reset."
+    },
+    {
+      "id": "ev-pm0215-stack",
+      "type": "document",
+      "persistence": "external",
+      "ref": "PM0215, STM32F0 series Cortex-M0 programming manual, STMicroelectronics",
+      "revision": "Rev 2, February 2023",
+      "location": "page 5/72, section 2.1.2 Stacks",
+      "description": "Full descending stack: push decrements SP then writes."
+    },
+    {
+      "id": "ev-pm0215-epsr",
+      "type": "document",
+      "persistence": "external",
+      "ref": "PM0215, STM32F0 series Cortex-M0 programming manual, STMicroelectronics",
+      "revision": "Rev 2, February 2023",
+      "location": "page 8/72, Table 7 EPSR bit definitions and following text",
+      "description": "EPSR bit 24 is the T bit; EPSR reads as zero from application software via MSR; executing with T=0 causes HardFault or lockup."
+    },
+    {
+      "id": "ev-linker-script",
+      "type": "linker_script",
+      "persistence": "committed",
+      "ref": "linker/stm32f030r8.ld",
+      "description": "Declares MEMORY, the absolute assignment _stack_top = ORIGIN(SRAM) + LENGTH(SRAM), and a SECTIONS block placing .text in FLASH. No ENTRY and no vector-table output section."
+    },
+    {
+      "id": "ev-startup-c",
+      "type": "file",
+      "persistence": "committed",
+      "ref": "src/startup.c",
+      "description": "Defines Reset_Handler, which calls main() and traps. Unreachable at this commit."
+    },
+    {
+      "id": "ev-deep-dive",
+      "type": "file",
+      "persistence": "committed",
+      "ref": "docs/deep-dives/learning-from-artifacts.md",
+      "description": "Command-by-command walkthrough of the compile, link and inspect stages with real captured output, a Provenance table, and an explicit Unverified section."
+    },
+    {
+      "id": "ev-discoveries",
+      "type": "file",
+      "persistence": "committed",
+      "ref": ".agent/discoveries.md",
+      "description": "Verified-findings log. Carries the corrected reset-vector wording and the max-page-size measurement."
+    },
+    {
+      "id": "ev-commit-stacktop",
+      "type": "commit",
+      "persistence": "committed",
+      "ref": "57e97cc",
+      "description": "_stack_top defined in linker script. Also the commit containing the uncorrected 'first executable word ... at offset 4' wording."
+    },
+    {
+      "id": "ev-commit-correction",
+      "type": "commit",
+      "persistence": "committed",
+      "ref": "6dec92c",
+      "description": "Correct reset-vector wording; verify the lld max-page-size default."
+    },
+    {
+      "id": "ev-commit-reset",
+      "type": "commit",
+      "persistence": "committed",
+      "ref": "f4aba42",
+      "description": "Add Reset_Handler and a deep dive on reading build artifacts."
+    },
+    {
+      "id": "ev-commit-provenance",
+      "type": "commit",
+      "persistence": "committed",
+      "ref": "41d9e38",
+      "description": "Pin the deep-dive provenance to its own commit."
+    },
+    {
+      "id": "ev-prior-trace",
+      "type": "file",
+      "persistence": "committed",
+      "ref": ".frontier/sessions/2026-08-22T080748Z-linker-memory-and-orphan-placement.json",
+      "description": "Prior session trace. Its claim-page-align-default was recorded as status 'inferred' with the verification this session performed; its claim-not-bootable named the byte inspection this session performed."
+    },
+    {
+      "id": "ev-map-file",
+      "type": "map_file",
+      "persistence": "reproducible",
+      "ref": "build/fm001.map",
+      "description": "Link map. Regenerable via the -Map flag on the recorded ld.lld command at commit f4aba42. Decisive lines quoted in observations."
+    },
+    {
+      "id": "ev-symtab",
+      "type": "command_output",
+      "persistence": "reproducible",
+      "ref": "llvm-readelf -s build/fm001.elf",
+      "description": "Symbol table showing _stack_top ABS, the odd FUNC values, and the even $t mapping symbols. Decisive lines quoted in observations."
+    },
+    {
+      "id": "ev-disasm",
+      "type": "command_output",
+      "persistence": "reproducible",
+      "ref": "llvm-objdump -d --section=.text build/fm001.elf",
+      "description": "Disassembly showing Reset_Handler at 0x08000004 opening with push {r7, lr} and the resolved BL. Decisive lines quoted in observations."
+    },
+    {
+      "id": "ev-obj-reloc",
+      "type": "command_output",
+      "persistence": "reproducible",
+      "ref": "llvm-readelf -r build/startup.o ; llvm-objdump -d build/startup.o",
+      "description": "Pre-link R_ARM_THM_CALL against undefined main, and the placeholder BL branching to itself. Decisive lines quoted in observations."
+    },
+    {
+      "id": "ev-obj-sections",
+      "type": "command_output",
+      "persistence": "reproducible",
+      "ref": "llvm-readelf -S build/startup.o",
+      "description": "Shows the function landed in a plain .text section of 0x0c bytes, not .text.Reset_Handler."
+    },
+    {
+      "id": "ev-readelf-segments",
+      "type": "command_output",
+      "persistence": "reproducible",
+      "ref": "llvm-readelf -l <elf>",
+      "description": "PT_LOAD segments split by permission and aligned to max-page-size. Decisive lines quoted in observations."
+    },
+    {
+      "id": "ev-bin-xxd",
+      "type": "command_output",
+      "persistence": "reproducible",
+      "ref": "llvm-objcopy -O binary build/fm001.elf build/fm001.bin ; xxd build/fm001.bin",
+      "description": "32-byte flat image. First eight bytes quoted in observations."
+    },
+    {
+      "id": "ev-unwind",
+      "type": "command_output",
+      "persistence": "reproducible",
+      "ref": "llvm-readobj --unwind build/fm001.elf",
+      "description": "Decoded .ARM.exidx: two CantUnwind entries, the second at the end of .text rather than at Reset_Handler. Decisive values quoted in observations."
+    },
+    {
+      "id": "ev-cmd-maxpagesize",
+      "type": "command",
+      "persistence": "reproducible",
+      "ref": "ld.lld -T <MEMORY-only script> build/main.o -o <out> -Map <map> [-z max-page-size=N]",
+      "description": "The three-way comparison establishing the default. The MEMORY-only script was written to a scratch directory and is not committed; it is the linker script at commit 57e97cc with the SECTIONS block and the _stack_top assignment removed."
+    }
+  ],
+  "future_work": {
+    "experiments": [
+      {
+        "idea": "Link two functions with differing unwind models and observe whether .ARM.exidx grows to three entries.",
+        "rationale": "Would settle whether coalescing is the mechanism behind the single entry observed here.",
+        "prerequisites": [
+          "Understanding that .ARM.exidx entries are 8 bytes and that the table carries a sentinel"
+        ]
+      },
+      {
+        "idea": "Rebuild with -ffunction-sections and link with --gc-sections; observe whether an unreferenced function is removed.",
+        "rationale": "Reset_Handler is currently unreferenced, making it a natural subject once a vector table exists to reference it."
+      },
+      {
+        "idea": "Build with -O2 and compare Reset_Handler's prologue against the -O0 version.",
+        "rationale": "Separates -O0 frame-pointer scaffolding from what the call genuinely requires, which bears on whether the stack is touched before MSP is valid."
+      }
+    ],
+    "course_topics": [
+      {
+        "topic": "Program Status Register: APSR, IPSR, EPSR and the MRS/MSR combinations",
+        "rationale": "Deliberately deferred this session. Only the EPSR T-bit was load-bearing, and EPSR reads as zero from application software, so the combination access is not usable until a fault handler can read the stacked xPSR.",
+        "level": "intermediate",
+        "related_concepts": [
+          "Thumb state bit",
+          "Fault handling",
+          "Exception entry and return"
+        ]
+      },
+      {
+        "topic": "ELF sections versus segments",
+        "rationale": "The distinction explains both the orphan-placement failure and why half the image is metadata.",
+        "level": "foundation",
+        "related_concepts": [
+          "PT_LOAD",
+          "max-page-size",
+          "Section permissions"
+        ]
+      },
+      {
+        "topic": "Relocations as deferred work",
+        "rationale": "The placeholder BL branching to itself, and its patched encoding after linking, make the abstract idea concrete in two lines of output.",
+        "level": "foundation"
+      }
+    ],
+    "exercises": [
+      {
+        "exercise": "Show a symbol table containing an odd FUNC value and ask the learner to predict the disassembly address before running objdump.",
+        "rationale": "The odd address is visible long before anyone explains interworking, so the discrepancy is discovered rather than told.",
+        "verification": "Learner states the address is the symbol value with bit 0 masked, and identifies bit 0 as instruction-set state rather than part of the address."
+      },
+      {
+        "exercise": "Reverse the two object files on the link line and have the learner locate what changed in the map file.",
+        "rationale": "Placement feels semantic until it is shown to be argument order.",
+        "verification": "Learner identifies input-file order as the cause without being told."
+      },
+      {
+        "exercise": "Give the learner the 32-byte flat binary and the PM0215 reset text, and ask whether the image can boot.",
+        "rationale": "Connects a documentation statement to raw bytes without needing hardware.",
+        "verification": "Learner identifies that the first two words hold instructions rather than a stack pointer and a reset vector."
+      }
+    ],
+    "likely_misconceptions": [
+      {
+        "misconception": "A function pointer taken in C needs a manual '| 1' before being stored in a vector table.",
+        "why_likely": "Published startup code frequently writes the bit explicitly, which is only necessary when the address is written as a raw integer or in hand-written assembly. The C symbol already carries it."
+      },
+      {
+        "misconception": "Offset 0x04 of the image holds the first instruction.",
+        "why_likely": "It is called the reset vector and sits adjacent to code; the indirection through a pointer is easy to miss. The assistant made exactly this error in this session."
+      },
+      {
+        "misconception": "Declaring a symbol in a linker script places data in the image.",
+        "why_likely": "The assignment looks like a definition, and the symbol appears in the symbol table, but nothing is emitted."
+      }
+    ],
+    "useful_artifacts": [
+      {
+        "evidence_id": "ev-deep-dive",
+        "description": "Command-by-command walkthrough with real captured output at a known commit.",
+        "why_useful": "Already structured as a guided reading of build artifacts, with a Provenance table making the toolchain versions and commit explicit and an Unverified section separating observation from explanation."
+      }
+    ],
+    "prerequisites": [
+      {
+        "concept": "Vector table",
+        "requires": [
+          "Initial stack pointer value as a linker symbol",
+          "Bit 0 of a Thumb function pointer"
+        ],
+        "noticed_how": "Reset_Handler's first instruction is push {r7, lr}, so MSP must already be valid when it is entered; and word 1 of the table must carry bit 0 set or the core leaves reset out of Thumb state. Both facts had to land before the table could be written correctly rather than copied."
+      },
+      {
+        "concept": "--gc-sections",
+        "requires": [
+          "-ffunction-sections"
+        ],
+        "noticed_how": "The compiler emitted a plain .text section, so per-function garbage collection is impossible as the build is configured."
+      },
+      {
+        "concept": "Reading a link map",
+        "requires": [
+          "Sections versus segments",
+          "Orphan section placement"
+        ],
+        "noticed_how": "The map's three-level structure only becomes meaningful once output sections, input sections and symbols are distinguished."
+      }
+    ]
+  },
+  "notes": "learning.model_updates is deliberately empty. The user opened the session by stating two readings of PM0215 correctly and asking for confirmation, and their later questions about bit 0, link order and input sections were posed as open questions rather than as stated beliefs. Per the specification, a belief that was already correct and merely confirmed is an observation, not a model update, and no prior model was invented to fill the field. The genuine belief-level signal this session is in learning.misconceptions, both entries held by the assistant.\n\nTwo verification_required items from the prior trace were discharged here: claim-page-align-default (tested by exp-max-page-size) and the byte-inspection half of claim-not-bootable (xxd on the flat image). The prior trace is not superseded — it was not wrong, and recording the verification in a later trace is the intended mechanism.\n\nNo hardware was involved. Nothing in this session was programmed to a device."
+}
