@@ -51,6 +51,12 @@ Before proposing changes, read these files in order:
 
 Then inspect the current repository state, including `git status`, relevant code, and relevant documentation metadata.
 
+## Frontier Session Capture
+
+Only when the user explicitly asks to capture, record, or save a meaningful engineering session, read `.codex/skills/session-capture/SKILL.md` and follow its procedure. The canonical, vendor-neutral contract is `.frontier/session-capture.md`; the Codex skill is only an adapter.
+
+Never create a session trace automatically or as a side effect of ordinary work. Session traces complement the `.agent/` workflow and must not silently replace or modify it.
+
 ## Shutdown and Update Procedure
 
 After meaningful work:

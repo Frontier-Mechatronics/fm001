@@ -1,0 +1,4 @@
+interface:
+  display_name: "Frontier Session Capture"
+  short_description: "Capture a verified Frontier session trace"
+  default_prompt: "Use $session-capture to record this meaningful engineering session."
