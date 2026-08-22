@@ -46,7 +46,13 @@ are stronger than what anyone remembers a conversation saying. Traces record whe
 scale, because a fluent explanation from an agent is not a fact.
 
 **Learning progression, not conversation summary.** The valuable record is `prior model → observation →
-updated model`, retained even when — especially when — the prior model was wrong.
+updated model`, retained even when — especially when — the prior model was wrong. Each recorded belief is
+tagged `explicit` or `inferred`, so a belief the agent deduced can never be mined later as something the
+engineer actually said.
+
+**Evidence declares its own durability.** Every reference says whether it is `committed`, `reproducible`,
+`ephemeral`, or `external`. Ephemeral evidence must have its decisive content quoted into the trace, so a
+finding survives `build/` being cleaned.
 
 **Failures are kept.** Rejected hypotheses and wrong turns are not tidied away. They are the map of the
 mistakes actually available at that junction.

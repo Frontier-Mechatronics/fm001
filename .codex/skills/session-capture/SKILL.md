@@ -21,7 +21,7 @@ This is a thin Codex adapter. The vendor-neutral contract is `.frontier/session-
    ```
 
 3. Re-read files and command output that the trace will cite. Record facts as `observed`, `inferred`, `hypothesis`, or `unresolved`; retain real model updates, rejected hypotheses, failures, and unresolved questions.
-4. Write exactly one trace to `.frontier/sessions/YYYY-MM-DDTHHMMSS-short-topic.json`. Its `trace_id` must equal the filename stem.
+4. Write exactly one trace to `.frontier/sessions/YYYY-MM-DDTHHMMSSZ-short-topic.json` (UTC; the trailing `Z` is required). Its `trace_id` must equal the filename stem.
 5. Validate it and fix every error:
 
    ```sh
@@ -37,4 +37,6 @@ This is a thin Codex adapter. The vendor-neutral contract is `.frontier/session-
 - Do not commit a trace unless the user asks.
 - Do not create a trace if the session does not meet the contract's threshold for meaningful learning or engineering work.
 - Do not invent evidence, prior beliefs, hypotheses, model updates, or course material. Prefer omission or an empty array.
+- Do not write course material, lessons, or exercises at all, invented or not. Capture pointers in `future_work` only.
+- Mark `prior_model_provenance` and `misconceptions[].provenance` as `explicit` only where the user actually stated the belief; otherwise `inferred`.
 - Do not silently update `.agent/` files while capturing a trace; those files have their own update workflow.

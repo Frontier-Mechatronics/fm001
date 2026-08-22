@@ -36,9 +36,12 @@ this file only bridges Claude Code's invocation to it.
      that turned out to be wrong;
    - keep failures with their rejected hypotheses;
    - keep unresolved questions open;
-   - record your own errors in `learning.misconceptions` with `held_by: agent` where they occurred.
+   - record your own errors in `learning.misconceptions` with `held_by: agent` where they occurred;
+   - set `prior_model_provenance` and `misconceptions[].provenance` to `explicit` **only** where the user
+     actually stated the belief. If you deduced it, it is `inferred`. Never invent a belief to make a
+     model update look complete — that is the one error this corpus cannot recover from.
 
-4. **Write one trace** to `.frontier/sessions/YYYY-MM-DDTHHMMSS-short-topic.json`, with `trace_id` equal
+4. **Write one trace** to `.frontier/sessions/YYYY-MM-DDTHHMMSSZ-short-topic.json`  (UTC; the trailing `Z` is required), with `trace_id` equal
    to the filename stem.
 
 5. **Validate:**
@@ -63,5 +66,6 @@ this file only bridges Claude Code's invocation to it.
 - Prefer an empty array over an invented entry. Fabricated content permanently corrupts the corpus.
 - If the session does not warrant a trace under the specification's guidance, say so instead of writing a
   thin one.
-- Do not update `.agent/` files as part of capturing a trace. Those files have their own workflow in
-  `AGENTS.md`; capture records history, it does not maintain project state.
+- Do not silently update `.agent/` files while capturing a trace. Those files have their own workflow in
+  `AGENTS.md`; capture records history, it does not maintain project state. Updating them is a separate
+  request the user makes explicitly.

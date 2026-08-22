@@ -110,6 +110,7 @@ Use `learning.model_updates` for this, and keep all three parts:
 {
   "topic": "Linker MEMORY regions",
   "prior_model": "A region declaration is enough to make code land at that address.",
+  "prior_model_provenance": "explicit",
   "observation": "Map file showed .text at 0x08010010 despite FLASH originating at 0x08000000.",
   "updated_model": "MEMORY declares available address ranges; SECTIONS decides placement. Unnamed sections are orphans placed by linker heuristics.",
   "confidence": "high",
@@ -121,8 +122,20 @@ Rules that matter:
 
 - **Keep `prior_model` even when it was wrong.** Especially when it was wrong. The incorrect belief is
   the most pedagogically valuable field in the entire schema — it is what a future learner will also believe.
-- If the prior model was never explicitly voiced, say so rather than inventing one:
-  `"not stated; the question implied an assumption that ..."`.
+- **`prior_model_provenance` is mandatory and must be honest.** `explicit` means the learner actually said
+  it — quote or closely paraphrase. `inferred` means you deduced it from what was asked or attempted.
+  When in doubt, it is `inferred`.
+
+  This distinction guards a specific and severe failure mode: an agent inventing a plausible-sounding
+  misconception and recording it as something the learner believed. Mined across hundreds of traces,
+  fabricated beliefs would produce confident conclusions about learning difficulties that no human ever had.
+  Only `explicit` entries are empirical evidence of what someone believed; `inferred` entries are the trace
+  author's reading and must be treated as such downstream.
+
+  Note what the field does and does not do. It is a labelling convention supporting human review and later
+  filtering. It cannot *prevent* fabrication — an agent willing to invent a belief can mislabel it just as
+  easily. It works only to the extent that the agent is honest, and that the human reviewing the trace
+  checks the `explicit` entries against what they actually remember saying.
 - Do not record a model update that did not happen. A session where the user already understood something
   and had it confirmed is an `observation`, not an update.
 
@@ -134,6 +147,31 @@ that overstates competence is worse than no corpus.
 Record misconceptions in `learning.misconceptions`, including the agent's own. `held_by` accepts `agent`
 for good reason — assistants state things wrongly, and a corrected agent error is real signal about where
 this material is genuinely confusing.
+
+`misconceptions[].provenance` carries the same `explicit` / `inferred` requirement as `prior_model`, for the
+same reason and with the same limits. A misconception nobody voiced, recorded as `explicit`, is the most
+corrupting single entry that can enter this corpus.
+
+### Fields that grade themselves
+
+Several fields record the trace author's own assessment rather than an observation. Each is enforced to
+require the thing that would substantiate it:
+
+| Assertion | Must also supply |
+|---|---|
+| `claims[].status` is not `observed` | `verification_required` |
+| `concepts[].exposure` is `verified_by_experiment` | `evidence` |
+| `failures[].resolved` is `true` | `resolution` |
+| `misconceptions[].corrected` is `true` | `correction` |
+| `experiments[].status` is `completed` | `observed_result` |
+
+These are cheap to satisfy honestly and awkward to satisfy dishonestly, which is the point. If supplying the
+second column is difficult, that is usually the signal that the first column is overstated — downgrade the
+assertion rather than inventing support for it.
+
+One deliberate omission: a `completed` experiment is **not** required to carry `predicted_result`. Demanding
+a prediction after the outcome is known invites one reconstructed to match, which is worse than an absent
+field. Record the prediction when it was genuinely made beforehand, and leave it out otherwise.
 
 ## 6. Preserve failures and unresolved questions
 
@@ -193,6 +231,25 @@ Rules:
   survives the file's deletion.
 - `location` carries the position within an artifact: `"page 39/775"`, `"line 25"`, `"channel 2, 4.2 ms"`.
 
+Every evidence item declares `persistence`, because a reference is only as useful as the reader's ability to
+follow it later:
+
+| Value | Meaning |
+|---|---|
+| `committed` | Tracked in this repository at the recorded commit. Recoverable exactly. |
+| `reproducible` | Not stored, but regenerable by re-running a recorded command against a recorded commit. |
+| `ephemeral` | Neither stored nor reliably regenerable — a gitignored build output, console scrollback. |
+| `external` | Outside the repository — a vendor datasheet, a capture file on a lab machine. |
+
+**When evidence is `ephemeral`, the decisive content must also be quoted into an `observation`.** This is the
+rule that keeps a trace meaningful after `build/` is cleaned. A trace whose central finding rests only on a
+path that no longer exists has recorded nothing. The validator warns when a `committed` item points at a path
+that looks like build output.
+
+This deliberately does not create an artifact store. If particular captures later justify archival — logic
+analyser sessions, oscilloscope datasets, manufacturing measurements — that is a considered decision for a
+future version, not something to start doing by default.
+
 Identifiers live in separate namespaces per record type — `evidence`, `failures`, `experiments`, `claims` —
 and must be unique within their own. References are resolved **by field name, not by value**: an `evidence`
 array resolves only against evidence ids, `failure_id` only against failure ids. A reference that names a
@@ -206,17 +263,28 @@ Record the **class and revision** of hardware, not the individual unit. The sche
 numbers, probe IDs, or MCU unique device IDs, deliberately: traces are committed and may be shared, and such
 values identify a specific machine or person while almost never explaining an engineering result. If a
 per-unit identifier genuinely matters — a fault reproducible on exactly one board — describe it in `notes`
-in the least identifying way that still distinguishes the unit.
+use `hardware[].unit_alias`: a project-local name such as `board-a` or `fm-motor-a03`. Being a real field
+rather than prose, it supports correlating one unit across many traces — which is the actual engineering
+need — without recording an MCU UID, a probe serial, or a manufacturer identifier. The alias is a name the
+project assigns and controls; keep it stable once chosen, and record the mapping outside the corpus if you
+need one.
+
+The evidence registry is subject to the same policy. It has no `hardware_id` type, and a `ref` or command
+string must not become the back door through which a serial arrives — record
+`openocd -c "hla_serial <elided>"` rather than the real value.
 
 ## 9. Naming, storage, and immutability
 
 Traces are stored in `.frontier/sessions/` as JSON, one file per session:
 
 ```text
-.frontier/sessions/YYYY-MM-DDTHHMMSS-short-topic.json
+.frontier/sessions/YYYY-MM-DDTHHMMSSZ-short-topic.json
 ```
 
-- UTC or local time consistently; the timestamp exists to order and disambiguate, not to be authoritative.
+- **The timestamp is UTC and the trailing `Z` is mandatory.** Filenames written in different timezones must
+  still sort chronologically against one another; a local-time basis breaks that silently and cannot be
+  repaired once traces accumulate. `created_at` inside the file may carry a real local offset — that is
+  where timezone information belongs.
 - `short-topic` is lowercase kebab-case, a few words, describing the subject: `linker-flash-overflow`.
 - `trace_id` inside the file **must equal the filename without `.json`**.
 - Lexicographic sort equals chronological sort. This is deliberate; keep it.
@@ -249,12 +317,18 @@ performs checks JSON Schema cannot express:
 
 - every referenced id exists **in the namespace the referencing field implies**;
 - ids are unique within each namespace;
+- an evidence item claiming `persistence: committed` does not point at something that looks like build output;
 - `trace_id` matches the filename;
 - traces in `sessions/` are not marked `example`.
 
 The fallback is deliberately imperfect. It supports the keywords this schema actually uses, including
-`allOf` and `if`/`then` so that cross-field rules such as the `verification_required` requirement are
-honoured without `jsonschema` installed. If validation ever needs to be authoritative — in CI, say —
+`allOf` and `if`/`then` so the cross-field rules above are honoured without `jsonschema` installed. Note that
+timestamps are constrained by `pattern` rather than by `format`: JSON Schema treats `format` as an annotation
+by default, so a `format`-only constraint would be enforced by neither path.
+
+Its limitation is silence rather than noise — if a future schema uses a keyword the fallback does not
+implement, the fallback ignores that keyword and reports `ok`. Any schema change must therefore be
+parity-tested against both paths before it lands. If validation ever needs to be authoritative — in CI, say —
 install `jsonschema` in the project environment and use the real path. Do not grow the fallback further
 into a JSON Schema implementation.
 

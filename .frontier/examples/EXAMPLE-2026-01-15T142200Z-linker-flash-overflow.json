@@ -1,8 +1,8 @@
 {
   "schema_version": "session-v1",
-  "trace_id": "EXAMPLE-2026-01-15T142200-linker-flash-overflow",
+  "trace_id": "EXAMPLE-2026-01-15T142200Z-linker-flash-overflow",
   "example": true,
-  "created_at": "2026-01-15T14:22:00+11:00",
+  "created_at": "2026-01-15T14:22:00Z",
   "title": "EXAMPLE — Linker FLASH overflow caused by orphan section alignment",
   "summary": "Synthetic trace illustrating the session-v1 structure. Not a record of real work; commit SHAs and paths are placeholders. A 4-byte .text failed to fit in 64 KiB of flash because a MEMORY-only linker script left every section orphaned, and the linker aligned .text past the end of the region.",
 
@@ -108,6 +108,7 @@
       {
         "topic": "What a MEMORY block does",
         "prior_model": "Declaring a FLASH region at ORIGIN 0x08000000 is enough to make code land there.",
+        "prior_model_provenance": "explicit",
         "observation": "With only MEMORY declared, .text was placed at 0x08010010 — outside the declared region entirely.",
         "updated_model": "MEMORY declares ranges available for allocation and their attributes. It does not position anything. Sections not named in a SECTIONS block are orphans, positioned by linker heuristics that may ignore the intended layout.",
         "evidence": ["ev-map-file"],
@@ -117,6 +118,7 @@
       {
         "topic": "Interpreting a region overflow error",
         "prior_model": "A 'will not fit' error means the content is too large for the region.",
+        "prior_model_provenance": "inferred",
         "observation": "The overflowing section was 4 bytes and the region was 64 KiB.",
         "updated_model": "The error reports that a section's end address exceeds the region's end address. That can be caused by size, but equally by placement. The map file distinguishes the two.",
         "evidence": ["ev-link-error", "ev-map-file"],
@@ -139,6 +141,7 @@
       {
         "misconception": "A successful link implies a bootable image.",
         "held_by": "user",
+        "provenance": "explicit",
         "corrected": true,
         "correction": "The resulting image places main at the base of flash with no vector table, so the CPU would load an instruction word as its initial stack pointer. Linking success says nothing about boot correctness.",
         "evidence": ["ev-readelf-sections"]
@@ -209,10 +212,10 @@
   ],
 
   "evidence": [
-    { "id": "ev-linker-script", "type": "linker_script", "ref": "linker/example.ld", "description": "Placeholder script; MEMORY block, later a minimal SECTIONS block." },
-    { "id": "ev-link-error", "type": "command_output", "ref": "ld.lld -T linker/example.ld build/main.o -o build/example.elf", "description": "Region overflow error text, quoted in full in the failure record." },
-    { "id": "ev-map-file", "type": "map_file", "ref": "build/example.map", "description": "Linker map showing .ARM.exidx at 0x08000000 and .text at 0x08010010.", "location": "first six lines", "captured_at": "2026-01-15T14:05:00+11:00" },
-    { "id": "ev-readelf-sections", "type": "command_output", "ref": "llvm-readelf -S -l build/example.elf", "description": "Section and program headers after the SECTIONS fix." }
+    { "id": "ev-linker-script", "type": "linker_script", "persistence": "committed", "ref": "linker/example.ld", "description": "Placeholder script; MEMORY block, later a minimal SECTIONS block." },
+    { "id": "ev-link-error", "type": "command_output", "persistence": "reproducible", "ref": "ld.lld -T linker/example.ld build/main.o -o build/example.elf", "description": "Region overflow error text, quoted in full in the failure record." },
+    { "id": "ev-map-file", "type": "map_file", "persistence": "ephemeral", "ref": "build/example.map", "description": "Linker map showing .ARM.exidx at 0x08000000 and .text at 0x08010010. Gitignored build output; the decisive addresses are quoted in the observations so the finding survives the file.", "location": "first six lines", "captured_at": "2026-01-15T14:05:00Z" },
+    { "id": "ev-readelf-sections", "type": "command_output", "persistence": "reproducible", "ref": "llvm-readelf -S -l build/example.elf", "description": "Section and program headers after the SECTIONS fix." }
   ],
 
   "future_work": {

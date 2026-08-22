@@ -94,6 +94,12 @@ def _check(value, node, schema, path, errors):
             if name in props:
                 _check(sub, props[name], schema, f"{path}.{name}", errors)
 
+    if isinstance(value, list):
+        if "minItems" in node and len(value) < node["minItems"]:
+            errors.append(f"{path}: needs at least {node['minItems']} item(s)")
+        if "maxItems" in node and len(value) > node["maxItems"]:
+            errors.append(f"{path}: allows at most {node['maxItems']} item(s)")
+
     if isinstance(value, list) and "items" in node:
         for i, item in enumerate(value):
             _check(item, node["items"], schema, f"{path}[{i}]", errors)
@@ -162,9 +168,17 @@ def _collect_refs(trace):
     return refs
 
 
+# Path prefixes whose contents are conventionally build output rather than tracked files.
+# Used only to warn about an evidence item claiming to be recoverable when it probably is not.
+_LIKELY_UNTRACKED = ("build/", "dist/", "target/", "node_modules/", "__pycache__/")
+
+
 def semantic_check(trace, path):
     """Checks JSON Schema cannot express."""
     errors = []
+
+    if not isinstance(trace, dict):
+        return [f"top-level value is {type(trace).__name__}, expected an object"]
 
     stem = path.stem
     if trace.get("trace_id") != stem:
@@ -192,6 +206,16 @@ def semantic_check(trace, path):
     for ref, kind, where in refs:
         if ref not in declared[kind]:
             errors.append(f"{where}: {kind} id {ref!r} is not declared")
+
+    for item in trace.get("evidence", []):
+        if not isinstance(item, dict):
+            continue
+        ref, persistence = item.get("ref", ""), item.get("persistence")
+        if persistence == "committed" and isinstance(ref, str) and ref.startswith(_LIKELY_UNTRACKED):
+            errors.append(
+                f"note: evidence {item.get('id')!r} claims persistence 'committed' but {ref!r} "
+                "looks like build output; 'ephemeral' or 'reproducible' is probably correct"
+            )
 
     used = {r for r, kind, _ in refs if kind == "evidence"}
     for ref in sorted(declared["evidence"] - used):

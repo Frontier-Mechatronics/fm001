@@ -5,7 +5,7 @@
   "description": "A record of one meaningful engineering session: the work attempted, the learning progression, the evidence, the failures, and the ideas that emerged. Vendor-neutral. Written by an agent at explicit user request, reviewed by a human, and thereafter treated as a historical record.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "trace_id", "created_at", "title", "project", "repository", "objective"],
+  "required": ["schema_version", "trace_id", "created_at", "title", "project", "agents", "repository", "objective"],
 
   "properties": {
     "schema_version": {
@@ -24,6 +24,7 @@
     "created_at": {
       "type": "string",
       "format": "date-time",
+      "$ref": "#/$defs/timestamp",
       "description": "When the trace was written, not when the work began."
     },
     "title": {
@@ -56,7 +57,8 @@
 
     "agents": {
       "type": "array",
-      "description": "Participants in the session, human and machine. Vendor names appear here as data, never as structure.",
+      "description": "Participants in the session, human and machine. Vendor names appear here as data, never as structure. At least one entry is required: a trace that does not record which agent wrote it cannot be compared against others later.",
+      "minItems": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -122,6 +124,11 @@
           "identifier": { "type": "string", "description": "e.g. 'NUCLEO-F030R8', 'FM-PWR-A rev B'." },
           "description": { "type": "string" },
           "revision": { "type": "string" },
+          "unit_alias": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Project-local name for one physical unit, e.g. 'board-a', 'fm-motor-a03'. Use when a result is specific to an individual board rather than to its class. Must be a name the project assigns, never a manufacturer serial, probe ID, or MCU unique device ID — the point is longitudinal correlation across traces without recording an identifier that ties to a machine or person."
+          },
           "notes": { "type": "string" }
         }
       }
@@ -187,7 +194,17 @@
               },
               "evidence": { "$ref": "#/$defs/evidence_refs" },
               "notes": { "type": "string" }
-            }
+            },
+            "allOf": [
+              {
+                "$comment": "The strongest exposure level is a claim about what was demonstrated, so it must point at what demonstrated it.",
+                "if": {
+                  "required": ["exposure"],
+                  "properties": { "exposure": { "const": "verified_by_experiment" } }
+                },
+                "then": { "required": ["evidence"] }
+              }
+            ]
           }
         },
         "observations": {
@@ -210,10 +227,14 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["topic", "prior_model", "observation", "updated_model"],
+            "required": ["topic", "prior_model", "prior_model_provenance", "observation", "updated_model"],
             "properties": {
               "topic": { "type": "string" },
-              "prior_model": { "type": "string", "description": "The belief held before, stated plainly. If it was never explicitly voiced, say so." },
+              "prior_model": { "type": "string", "description": "The belief held before, stated plainly." },
+              "prior_model_provenance": {
+                "enum": ["explicit", "inferred"],
+                "description": "explicit: the learner actually stated this belief, and it should be quoted or closely paraphrased. inferred: the trace author deduced it from what was asked or attempted. Only 'explicit' is empirical evidence of what someone believed; 'inferred' is the trace author's reading and must not later be mined as fact."
+              },
               "observation": { "type": "string", "description": "The evidence that forced the change." },
               "updated_model": { "type": "string" },
               "evidence": { "$ref": "#/$defs/evidence_refs" },
@@ -242,14 +263,28 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["misconception", "held_by"],
+            "required": ["misconception", "held_by", "provenance"],
             "properties": {
               "misconception": { "type": "string" },
               "held_by": { "enum": ["user", "agent", "both", "unknown"] },
+              "provenance": {
+                "enum": ["explicit", "inferred"],
+                "description": "Same rule as prior_model_provenance. explicit: the misconception was actually voiced. inferred: the trace author concluded it was held. A plausible-but-invented misconception recorded as explicit is the most corrupting thing that can enter this corpus."
+              },
               "corrected": { "type": "boolean" },
               "correction": { "type": "string" },
               "evidence": { "$ref": "#/$defs/evidence_refs" }
-            }
+            },
+            "allOf": [
+              {
+                "$comment": "Claiming a misconception was corrected requires saying what replaced it.",
+                "if": {
+                  "required": ["corrected"],
+                  "properties": { "corrected": { "const": true } }
+                },
+                "then": { "required": ["correction"] }
+              }
+            ]
           }
         }
       }
@@ -272,7 +307,17 @@
           "conclusion": { "type": "string" },
           "status": { "enum": ["completed", "inconclusive", "abandoned", "planned"] },
           "evidence": { "$ref": "#/$defs/evidence_refs" }
-        }
+        },
+        "allOf": [
+          {
+            "$comment": "A completed experiment must say what was observed. predicted_result is deliberately NOT required: demanding it after the fact invites a prediction reconstructed to match the outcome, which is worse than an absent field.",
+            "if": {
+              "required": ["status"],
+              "properties": { "status": { "const": "completed" } }
+            },
+            "then": { "required": ["observed_result"] }
+          }
+        ]
       }
     },
 
@@ -306,7 +351,17 @@
           "resolved": { "type": "boolean" },
           "evidence": { "$ref": "#/$defs/evidence_refs" },
           "pedagogical_value": { "type": "string", "description": "Why a future learner would benefit from meeting this failure. Empty is acceptable; invented significance is not." }
-        }
+        },
+        "allOf": [
+          {
+            "$comment": "Claiming a failure was resolved requires saying how.",
+            "if": {
+              "required": ["resolved"],
+              "properties": { "resolved": { "const": true } }
+            },
+            "then": { "required": ["resolution"] }
+          }
+        ]
       }
     },
 
@@ -347,7 +402,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "type", "ref"],
+        "required": ["id", "type", "ref", "persistence"],
         "properties": {
           "id": { "$ref": "#/$defs/local_id" },
           "type": {
@@ -355,15 +410,19 @@
               "file", "directory", "commit", "diff", "command", "command_output", "log",
               "binary", "elf", "linker_script", "map_file", "debugger_output",
               "saleae_capture", "scope_capture", "measurement", "photo",
-              "schematic", "pcb_revision", "board_revision", "hardware_id",
+              "schematic", "pcb_revision", "board_revision",
               "document", "datasheet", "url", "other"
             ]
+          },
+          "persistence": {
+            "enum": ["committed", "reproducible", "ephemeral", "external"],
+            "description": "committed: tracked in this repository at the recorded commit, recoverable exactly. reproducible: not stored, but regenerable by re-running a recorded command against a recorded commit. ephemeral: neither stored nor reliably regenerable, e.g. a gitignored build output or console scrollback — the decisive content MUST also be quoted into an observation. external: outside the repository, e.g. a vendor datasheet or a capture file on a lab machine."
           },
           "ref": { "type": "string", "description": "Repository-relative path where possible; otherwise a descriptive reference such as a document ID and revision. Absolute machine-specific paths age badly." },
           "description": { "type": "string" },
           "revision": { "type": "string", "description": "Document revision, board revision, or similar." },
           "location": { "type": "string", "description": "Where within the artifact, e.g. 'page 39/775', 'line 25', 'channel 2, 4.2 ms'." },
-          "captured_at": { "type": "string", "format": "date-time" }
+          "captured_at": { "$ref": "#/$defs/timestamp" }
         }
       }
     },
@@ -477,8 +536,13 @@
   "$defs": {
     "trace_id": {
       "type": "string",
-      "pattern": "^(EXAMPLE-)?[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}-[a-z0-9][a-z0-9-]*$",
-      "description": "YYYY-MM-DDTHHMMSS-short-topic, optionally prefixed EXAMPLE- for synthetic traces."
+      "pattern": "^(EXAMPLE-)?[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}Z-[a-z0-9][a-z0-9-]*$",
+      "description": "YYYY-MM-DDTHHMMSSZ-short-topic, UTC, optionally prefixed EXAMPLE- for synthetic traces. The trailing Z is mandatory: filenames written in different timezones must still sort chronologically."
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.,][0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$",
+      "description": "RFC 3339 date-time with an explicit offset. Checked by pattern rather than by 'format', because JSON Schema treats format as an annotation by default and neither validation path would otherwise enforce it."
     },
     "local_id": {
       "type": "string",
