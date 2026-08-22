@@ -231,3 +231,108 @@ exactly, so the default is `0x10000`.
   not depend on a linker-specific default staying the same across versions.
 - Scope limit: this establishes lld's behaviour and default. It says nothing about GNU `ld`, which is not
   installed on this host and may use a different default.
+
+## 2026-08-22 — Reset_Handler linked and inspected; bit 0 of a function symbol is state, not address
+
+First project-owned startup source. `src/startup.c` defines `Reset_Handler`, which calls `main()` and traps.
+There is still no vector table, so nothing points the core at it; it was compiled and linked purely to be
+inspected. The linker script was not changed for this step.
+
+- Commands:
+
+  ```sh
+  clang --target=arm-none-eabi -mcpu=cortex-m0 -mthumb -ffreestanding -c src/startup.c -o build/startup.o
+  ld.lld -T linker/stm32f030r8.ld build/main.o build/startup.o -o build/fm001.elf -Map build/fm001.map
+  ```
+
+- `*(.text*)` captured the new code with no script change. From `build/fm001.map`:
+
+  ```text
+   8000000  8000000       10     4 .text
+   8000000  8000000        4     4         build/main.o:(.text)
+   8000004  8000004        c     4         build/startup.o:(.text)
+  ```
+
+  `.text` grew from 4 to 16 bytes; `build/fm001.bin` from 20 to 32 bytes.
+
+- The compiler placed the function in a plain `.text` input section, not `.text.Reset_Handler`.
+  `llvm-readelf -S build/startup.o` shows section `[2] .text PROGBITS ... 00000c ... AX`. Per-function
+  sections would require `-ffunction-sections`, which FM001 does not currently pass. This matters later:
+  `--gc-sections` cannot discard individual functions without it.
+
+### Bit 0 of a Thumb function symbol encodes instruction-set state
+
+- `llvm-readelf -s build/fm001.elf`:
+
+  ```text
+     Num:    Value  Size Type    Bind   Vis       Ndx Name
+       2: 08000000     0 NOTYPE  LOCAL  DEFAULT     1 $t
+       4: 08000004     0 NOTYPE  LOCAL  DEFAULT     1 $t
+       5: 08000001     4 FUNC    GLOBAL DEFAULT     1 main
+       6: 08000005    12 FUNC    GLOBAL DEFAULT     1 Reset_Handler
+  ```
+
+- `llvm-objdump -d` shows the instructions at the *even* addresses:
+
+  ```text
+  08000000 <main>:
+   8000000: e7ff         b  0x8000002 <main+0x2>
+   8000002: e7fe         b  0x8000002 <main+0x2>
+
+  08000004 <Reset_Handler>:
+   8000004: b580         push  {r7, lr}
+   8000006: af00         add   r7, sp, #0x0
+   8000008: f7ff fffa    bl    0x8000000 <main>
+   800000c: e7ff         b     0x800000e <Reset_Handler+0xa>
+   800000e: e7fe         b     0x800000e <Reset_Handler+0xa>
+  ```
+
+- So `Reset_Handler` as a symbol is `0x08000005`; its first instruction is at `0x08000004`. Bit 0 is not
+  part of the address. It is the ARM interworking convention: in a value destined for PC, bit 0 selects
+  instruction set — 1 = Thumb, 0 = ARM — and is loaded into the EPSR T-bit by `BX`, `BLX` and `POP {PC}`.
+  This is the same mechanism PM0215 Rev 2 page 7/72 describes for the reset vector. Cortex-M0 is Thumb-only,
+  so every function symbol carries it.
+- Direct evidence that this is a property of *function* symbols and not of the location: the `$t` mapping
+  symbol sits at the same place as each function but is **even** (`08000000`, `08000004`). `$t` marks
+  "Thumb code begins here" — an address. The `FUNC` symbol denotes a callable entity, so it carries the
+  state bit. Both describe the same byte.
+
+### The linker consumes bit 0 when resolving a call
+
+- Before linking, `llvm-objdump -d build/startup.o` shows the call as a placeholder branching to itself,
+  with an unresolved relocation:
+
+  ```text
+       4: f7ff fffe    bl  0x4 <Reset_Handler+0x4>
+  ```
+
+  ```text
+  Relocation section '.rel.text' contains 1 entries:
+   Offset     Info    Type                Sym. Value  Symbol's Name
+  00000004  0000050a R_ARM_THM_CALL         00000000   main
+  ```
+
+- After linking the encoding is `f7ff fffa`, targeting `0x08000000` — the **even** address. `BL` does not
+  change instruction-set state, so no state bit appears in the encoding; the linker masked bit 0 off the
+  symbol value when computing the branch displacement.
+
+### Placement within .text is link command-line order, nothing more
+
+- As linked (`main.o` first), `main` is at `0x08000000` and `Reset_Handler` at `0x08000004`.
+- Relinking with the inputs reversed (`ld.lld -T ... build/startup.o build/main.o ...`) reverses the layout:
+  `Reset_Handler` at `0x08000001` (instructions at `0x08000000`) and `main` at `0x0800000d`.
+- Nothing currently marks the reset handler as special. Once a vector table exists it will hold an explicit
+  pointer, so this ordering remains a layout preference rather than a correctness requirement.
+
+### Reset_Handler touches the stack on its first instruction
+
+- At the default optimisation level the function opens with `push {r7, lr}` — a store through SP before
+  anything else runs on the reset path.
+- Consequence: MSP must already hold a valid value when `Reset_Handler` is entered. This is exactly what
+  word 0 of the vector table is for, and why `_stack_top` was defined before the handler existed. If MSP
+  held garbage the device would fault before reaching `main`.
+- `extern int main(void);` is declared locally in `src/startup.c`. The trap loop after the call is
+  deliberate: PM0215 Rev 2 page 7/72 states LR is `0xFFFFFFFF` at reset, so `Reset_Handler` has no valid
+  return address and must not fall off its end.
+- Unchanged and still expected: `ld.lld: warning: cannot find entry symbol _start; not setting start
+  address`. No `ENTRY()` directive yet.

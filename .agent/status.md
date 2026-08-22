@@ -26,6 +26,12 @@ Build up the first project-owned linker script one deliberate step at a time, th
   reports it as `20002000  0  NOTYPE  GLOBAL  DEFAULT  ABS _stack_top`. Nothing references it yet and it emits
   no bytes: `build/fm001.bin` is byte-identical before and after the change (20 bytes, MD5
   `90c7062801e841ad5c604058eeec8e09`). PM0215 Rev 2 page 6/72 is the authority for what that value is for.
+- `src/startup.c` defines `Reset_Handler`, the first project-owned startup source. It calls `main()` and traps.
+  Nothing points the core at it yet.
+- `ld.lld -T linker/stm32f030r8.ld build/main.o build/startup.o` links both objects. `*(.text*)` captured the new
+  code with no linker-script change. `.text` is 16 bytes: `main` at `0x08000000`, `Reset_Handler` at `0x08000004`.
+- `Reset_Handler`'s symbol value is `0x08000005` while its first instruction is at `0x08000004`. Bit 0 is the ARM
+  Thumb-state bit, not an address bit. See `discoveries.md`.
 
 ## Next Intended Step
 
@@ -33,10 +39,13 @@ Give the image a vector table. `build/fm001.elf` still has `main` at the base of
 boot memory are instructions rather than the initial stack pointer and reset vector. The device cannot start
 from it. `_stack_top` now names the correct value but nothing stores it at offset 0.
 
-Next, in order: write a reset handler, emit a vector table whose first word is `_stack_top` and whose second word
-is the reset handler's address with bit[0] set, place that table at `ORIGIN(FLASH)` ahead of `.text`, and add
-`ENTRY()`. Confirm the required table layout and the minimum entry count from PM0215 and RM0360 rather than from
-an example script.
+`_stack_top` names the correct initial MSP value and `Reset_Handler` exists, but nothing stores either at
+`ORIGIN(FLASH)`, so the first words of boot memory are still instructions. The device cannot start from this image.
+
+Next, smallest first: add `ENTRY(Reset_Handler)`, which sets the ELF entry address and clears the standing
+`_start` warning without changing the image layout. Then emit a vector table whose first word is `_stack_top` and
+whose second is `Reset_Handler`, and place it at `ORIGIN(FLASH)` ahead of `.text`. Confirm the required table
+layout and the minimum entry count from PM0215 and RM0360 rather than from an example script.
 
 ## Current Toolchain
 
@@ -62,7 +71,15 @@ clang \
   -c src/main.c \
   -o build/main.o
 
-ld.lld -T linker/stm32f030r8.ld build/main.o -o build/fm001.elf -Map build/fm001.map
+clang \
+  --target=arm-none-eabi \
+  -mcpu=cortex-m0 \
+  -mthumb \
+  -ffreestanding \
+  -c src/startup.c \
+  -o build/startup.o
+
+ld.lld -T linker/stm32f030r8.ld build/main.o build/startup.o -o build/fm001.elf -Map build/fm001.map
 
 llvm-objcopy -O binary build/fm001.elf build/fm001.bin
 ```
@@ -77,6 +94,8 @@ llvm-readelf -s build/fm001.elf   # symbol table, including ABS linker-script sy
 ## Current Repository Shape
 
 - `src/main.c`: minimal C entry-point experiment.
+- `src/startup.c`: project-owned startup source. Currently defines `Reset_Handler` only — no vector table, no
+  `.data`/`.bss` initialisation.
 - `build/`: generated local objects; ignored by Git.
 - `docs/project-001-spec.md`: project specification.
 - `docs/references.md`: authoritative-reference metadata.
@@ -86,8 +105,8 @@ llvm-readelf -s build/fm001.elf   # symbol table, including ABS linker-script sy
 - `docs/references/`: local vendor PDFs; excluded from Git.
 - `.frontier/`: session-capture contract, schema, validator, and captured session traces.
 - `build.zig` is no longer present at the repository root.
-- No project-owned startup source, Makefile, or CI configuration exists. `build/fm001.elf` is produced by hand
-  with the commands above and is not tracked.
+- No Makefile or CI configuration exists. `build/fm001.elf` is produced by hand with the commands above and is
+  not tracked.
 - Tracked by Git: `.agent/`, `.claude/`, `.codex/`, `.frontier/`, `AGENTS.md`, `.gitignore`, `.python-version`,
   `LICENSE`, `README.md`, `docs/` (excluding `docs/references/`), `linker/`, and `src/`.
 

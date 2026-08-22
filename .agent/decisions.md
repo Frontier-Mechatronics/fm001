@@ -74,3 +74,24 @@ This is a chronological log. Record decisions when they are made; do not rewrite
     `0x00000000`; nothing yet writes `_stack_top` into that word. Storing it is the vector-table step.
   - Stack overflow on this part is silent. Cortex-M0 has no MPU and no stack-limit register, so growth
     past `0x20000000` wraps out of SRAM rather than faulting. Detection, if wanted, must be built.
+
+## 2026-08-22 — Startup code lives in `src/startup.c`; the reset entry point is `Reset_Handler`
+
+- Decision: Project-owned startup code goes in `src/startup.c`, separate from `src/main.c`. The reset entry
+  point is named `Reset_Handler`.
+- Rationale:
+  - Separate file: startup code and application code have different lifetimes and different review needs.
+    Startup runs before the C environment is fully established and will grow `.data`/`.bss` initialisation;
+    `main.c` should stay ordinary C.
+  - `Reset_Handler` is the near-universal name across Cortex-M toolchains, vendor documentation and
+    published startup code, so it aids recognition when reading reference material.
+- Known inconsistency, accepted deliberately: `Reset_Handler` is the CMSIS/ST convention, whereas
+  `_stack_top` was chosen specifically to avoid the vendor name `_estack`. The distinction drawn is that
+  `Reset_Handler` is a widely shared convention across the whole Cortex-M ecosystem, while `_estack` is
+  tied to ST's generated linker scripts. This is a judgement call, not a principle, and is recorded so it
+  is not mistaken for an oversight.
+- Consequences:
+  - `Reset_Handler` must not return. LR is `0xFFFFFFFF` at reset (PM0215 Rev 2 page 7/72), so it is entered
+    by the reset sequence rather than by a call and has no valid return address. It ends in a trap loop.
+  - The handler uses the stack on its first instruction, so a valid MSP is a precondition for it running at
+    all. Word 0 of the vector table must be in place before this code can execute.
