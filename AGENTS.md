@@ -53,7 +53,7 @@ Then inspect the current repository state, including `git status`, relevant code
 
 ## Frontier Session Capture
 
-Only when the user explicitly asks to capture, record, or save a meaningful engineering session, read `.codex/skills/session-capture/SKILL.md` and follow its procedure. The canonical, vendor-neutral contract is `.frontier/session-capture.md`; the Codex skill is only an adapter.
+Only when the user explicitly asks to capture, record, or save a meaningful engineering session, follow the canonical, vendor-neutral contract in `.frontier/session-capture.md`. Each tool has a thin adapter that defers to it: `.claude/skills/session-capture/SKILL.md` for Claude Code, `.codex/skills/session-capture/SKILL.md` for Codex. Where an adapter and the contract disagree, the contract wins.
 
 Never create a session trace automatically or as a side effect of ordinary work. Session traces complement the `.agent/` workflow and must not silently replace or modify it.
 

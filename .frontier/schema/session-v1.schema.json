@@ -122,7 +122,6 @@
           "identifier": { "type": "string", "description": "e.g. 'NUCLEO-F030R8', 'FM-PWR-A rev B'." },
           "description": { "type": "string" },
           "revision": { "type": "string" },
-          "serial": { "type": "string" },
           "notes": { "type": "string" }
         }
       }
@@ -327,8 +326,18 @@
           },
           "confidence": { "$ref": "#/$defs/confidence" },
           "evidence": { "$ref": "#/$defs/evidence_refs" },
-          "verification_required": { "type": "string", "description": "What would settle it. Required in spirit for anything not 'observed'." }
-        }
+          "verification_required": { "type": "string", "description": "What would settle it. Required whenever status is not 'observed'." }
+        },
+        "allOf": [
+          {
+            "$comment": "A claim that is not directly observed must say what would settle it.",
+            "if": {
+              "required": ["status"],
+              "properties": { "status": { "enum": ["inferred", "hypothesis", "unresolved"] } }
+            },
+            "then": { "required": ["verification_required"] }
+          }
+        ]
       }
     },
 

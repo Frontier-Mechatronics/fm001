@@ -92,7 +92,9 @@ The purpose of this field is narrow and important: **an agent's confident explan
 Without this distinction, a fluent-sounding guess made during a session becomes indistinguishable from a
 measured fact six months later, and the corpus quietly poisons itself.
 
-Anything not `observed` should carry `verification_required` — what would actually settle it.
+Anything not `observed` **must** carry `verification_required` — what would actually settle it.
+This is enforced by the schema and by the validator, not left to good intentions. A claim you cannot say
+how to verify is usually a claim that should not be recorded as knowledge at all.
 
 Where a primary document supports a claim, cite it precisely in the evidence registry: document ID,
 revision, and location (e.g. page number). "The datasheet says so" is not a citation.
@@ -191,8 +193,20 @@ Rules:
   survives the file's deletion.
 - `location` carries the position within an artifact: `"page 39/775"`, `"line 25"`, `"channel 2, 4.2 ms"`.
 
+Identifiers live in separate namespaces per record type — `evidence`, `failures`, `experiments`, `claims` —
+and must be unique within their own. References are resolved **by field name, not by value**: an `evidence`
+array resolves only against evidence ids, `failure_id` only against failure ids. A reference that names a
+real id of the wrong kind is an error, not a coincidence the validator will accept. Prefix ids to keep this
+readable in review (`ev-`, `fail-`, `exp-`, `claim-`).
+
 Hardware identity is evidence. Board and PCB revisions belong in `hardware`, because the same firmware
 behaves differently across revisions and a trace without that context can mislead badly later.
+
+Record the **class and revision** of hardware, not the individual unit. The schema has no field for serial
+numbers, probe IDs, or MCU unique device IDs, deliberately: traces are committed and may be shared, and such
+values identify a specific machine or person while almost never explaining an engineering result. If a
+per-unit identifier genuinely matters — a fault reproducible on exactly one board — describe it in `notes`
+in the least identifying way that still distinguishes the unit.
 
 ## 9. Naming, storage, and immutability
 
@@ -233,13 +247,16 @@ The validator uses the `jsonschema` package when it is installed and otherwise f
 dependency-free structural check covering required fields, types, enums, and patterns. It additionally
 performs checks JSON Schema cannot express:
 
-- every `evidence` id referenced elsewhere actually exists;
+- every referenced id exists **in the namespace the referencing field implies**;
+- ids are unique within each namespace;
 - `trace_id` matches the filename;
 - traces in `sessions/` are not marked `example`.
 
-The fallback is deliberately imperfect. If validation ever needs to be authoritative — in CI, say —
-install `jsonschema` in the project environment and use the real path. Do not grow the fallback into a
-JSON Schema implementation.
+The fallback is deliberately imperfect. It supports the keywords this schema actually uses, including
+`allOf` and `if`/`then` so that cross-field rules such as the `verification_required` requirement are
+honoured without `jsonschema` installed. If validation ever needs to be authoritative — in CI, say —
+install `jsonschema` in the project environment and use the real path. Do not grow the fallback further
+into a JSON Schema implementation.
 
 ## 11. Writing style for traces
 

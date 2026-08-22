@@ -98,6 +98,17 @@ def _check(value, node, schema, path, errors):
         for i, item in enumerate(value):
             _check(item, node["items"], schema, f"{path}[{i}]", errors)
 
+    # Core applicators needed for the schema's cross-field rules. Deliberately the only
+    # combinators supported here; anything beyond this belongs in real jsonschema.
+    for sub in node.get("allOf", []):
+        _check(value, sub, schema, path, errors)
+    if "if" in node:
+        probe = []
+        _check(value, node["if"], schema, path, probe)
+        branch = "then" if not probe else "else"
+        if branch in node:
+            _check(value, node[branch], schema, path, errors)
+
 
 def structural_check(trace, schema):
     errors = []
@@ -106,6 +117,50 @@ def structural_check(trace, schema):
 
 
 # ---------------------------------------------------------------- semantic check
+
+def _collect_ids(trace, key, errors):
+    """Return the set of ids declared in trace[key], reporting duplicates."""
+    seen, dupes = set(), set()
+    for item in trace.get(key, []):
+        if isinstance(item, dict) and isinstance(item.get("id"), str):
+            if item["id"] in seen:
+                dupes.add(item["id"])
+            seen.add(item["id"])
+    for dup in sorted(dupes):
+        errors.append(f"{key}: duplicate id {dup!r}")
+    return seen
+
+
+def _collect_refs(trace):
+    """Walk the trace collecting (id, kind, location) for every id reference.
+
+    Kind is determined by the field name, so an evidence reference can never be
+    satisfied by a failure id and vice versa.
+    """
+    refs = []
+
+    def walk(node, where):
+        if isinstance(node, dict):
+            for key, val in node.items():
+                if key == "evidence" and isinstance(val, list):
+                    for ref in val:
+                        if isinstance(ref, str):
+                            refs.append((ref, "evidence", where))
+                elif key == "evidence_id" and isinstance(val, str):
+                    refs.append((val, "evidence", where))
+                elif key == "failure_id" and isinstance(val, str):
+                    refs.append((val, "failure", where))
+                else:
+                    walk(val, f"{where}.{key}")
+        elif isinstance(node, list):
+            for i, item in enumerate(node):
+                walk(item, f"{where}[{i}]")
+
+    for key, val in trace.items():
+        if key != "evidence":  # the registry declares, it does not reference
+            walk(val, key)
+    return refs
+
 
 def semantic_check(trace, path):
     """Checks JSON Schema cannot express."""
@@ -118,37 +173,28 @@ def semantic_check(trace, path):
     in_sessions = path.parent.name == "sessions"
     if in_sessions and trace.get("example"):
         errors.append("example traces must live in .frontier/examples/, not sessions/")
-    if not in_sessions and path.parent.name == "examples" and not trace.get("example"):
-        errors.append("traces in examples/ must set \"example\": true")
+    if path.parent.name == "examples" and not trace.get("example"):
+        errors.append('traces in examples/ must set "example": true')
 
-    declared = {e["id"] for e in trace.get("evidence", []) if isinstance(e, dict) and "id" in e}
-    seen = []
+    # Declared ids, each namespace checked for duplicates independently.
+    declared = {
+        "evidence": _collect_ids(trace, "evidence", errors),
+        "failure": _collect_ids(trace, "failures", errors),
+    }
+    _collect_ids(trace, "experiments", errors)
+    _collect_ids(trace, "claims", errors)
 
-    def walk(node, where):
-        if isinstance(node, dict):
-            for key, val in node.items():
-                if key == "evidence" and isinstance(val, list) and all(isinstance(v, str) for v in val):
-                    for ref in val:
-                        seen.append((ref, where))
-                elif key in ("evidence_id", "failure_id") and isinstance(val, str):
-                    seen.append((val, where))
-                else:
-                    walk(val, f"{where}.{key}")
-        elif isinstance(node, list):
-            for i, item in enumerate(node):
-                walk(item, f"{where}[{i}]")
+    overlap = declared["evidence"] & declared["failure"]
+    for dup in sorted(overlap):
+        errors.append(f"note: id {dup!r} is used by both an evidence entry and a failure; legal but confusing")
 
-    for key, val in trace.items():
-        if key != "evidence":
-            walk(val, key)
+    refs = _collect_refs(trace)
+    for ref, kind, where in refs:
+        if ref not in declared[kind]:
+            errors.append(f"{where}: {kind} id {ref!r} is not declared")
 
-    failure_ids = {f["id"] for f in trace.get("failures", []) if isinstance(f, dict) and "id" in f}
-    for ref, where in seen:
-        if ref not in declared and ref not in failure_ids:
-            errors.append(f"{where}: evidence/failure id {ref!r} is not declared")
-
-    unused = declared - {r for r, _ in seen}
-    for ref in sorted(unused):
+    used = {r for r, kind, _ in refs if kind == "evidence"}
+    for ref in sorted(declared["evidence"] - used):
         errors.append(f"note: evidence {ref!r} is declared but never referenced")
 
     return errors

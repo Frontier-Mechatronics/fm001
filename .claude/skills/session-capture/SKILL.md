@@ -63,3 +63,5 @@ this file only bridges Claude Code's invocation to it.
 - Prefer an empty array over an invented entry. Fabricated content permanently corrupts the corpus.
 - If the session does not warrant a trace under the specification's guidance, say so instead of writing a
   thin one.
+- Do not update `.agent/` files as part of capturing a trace. Those files have their own workflow in
+  `AGENTS.md`; capture records history, it does not maintain project state.
