@@ -1,0 +1,287 @@
+{
+  "schema_version": "session-v1",
+  "trace_id": "2026-08-22T080748Z-linker-memory-and-orphan-placement",
+  "created_at": "2026-08-22T08:07:48Z",
+  "title": "First project-owned linker script: MEMORY regions, orphan placement failure, ELF layout",
+  "summary": "Built the FM001 linker script one step at a time, starting from a MEMORY block alone. Linking with MEMORY only failed with a region overflow that turned out to be a placement problem, not a size problem: a 4-byte .text was aligned to 0x08010010, past the end of a 64 KiB flash region. Naming .text in a SECTIONS block fixed it. Flash and SRAM addresses were confirmed against RM0360 and DS9773, and the resulting ELF was examined section by section and segment by segment.",
+
+  "project": {
+    "name": "FM001",
+    "repository_root": "/Users/elusivenode/Developer/frontier-mechatronics/fm001",
+    "remote": "git@github.com:Frontier-Mechatronics/fm001.git",
+    "subsystem": "linker"
+  },
+
+  "agents": [
+    { "name": "elusivenode", "role": "human" },
+    { "name": "Claude Code", "role": "assistant", "provider": "Anthropic", "model": "claude-opus-5" }
+  ],
+
+  "repository": {
+    "branch": "main",
+    "head_commit": "6d169c31f3ae3023650c6e9e12db5198ba617642",
+    "dirty": false,
+    "changed_files": [],
+    "commits_created": [
+      { "sha": "2a43fe8", "subject": "work with claude on understanding the linker script" },
+      { "sha": "42c16bc", "subject": "adding SECTIONS" }
+    ],
+    "toolchain": [
+      { "name": "clang", "version": "Apple clang 17.0.0 (clang-1700.6.3.2)", "notes": "--target=arm-none-eabi -mcpu=cortex-m0 -mthumb -ffreestanding" },
+      { "name": "ld.lld", "version": "Homebrew LLD 20.1.3" },
+      { "name": "llvm-readelf / llvm-objdump / llvm-objcopy", "version": "Homebrew LLVM 20.1.3" },
+      { "name": "pypdf", "version": "6.16.1", "notes": "installed into pyenv virtualenv fm001-3.12.2 during this session to read vendor PDFs" },
+      { "name": "poppler", "version": "26.08.0", "notes": "installed during this session; enables page rendering so figures and schematics are readable" }
+    ]
+  },
+
+  "objective": "Create the smallest useful project-owned linker script for the STM32F030R8, adding one construct at a time and understanding each addition before making the next.",
+
+  "activities": [
+    {
+      "summary": "Wrote a linker script containing only a MEMORY block declaring FLASH and SRAM.",
+      "kind": "implementation",
+      "files_changed": ["linker/stm32f030r8.ld"],
+      "outcome": "Script committed with no ENTRY, no SECTIONS, and no symbol definitions.",
+      "evidence": ["ev-script-pre-fix"]
+    },
+    {
+      "summary": "Confirmed the flash and SRAM base addresses and sizes for the R8 variant against primary documentation.",
+      "kind": "investigation",
+      "outcome": "RM0360 Table 1 gives the STM32F030x8 boundaries directly; DS9773 confirms STM32F030R8 is an x8 device.",
+      "evidence": ["ev-rm0360-table1", "ev-ds9773-table2"]
+    },
+    {
+      "summary": "Installed pypdf, then poppler, so vendor PDFs could be read and cited directly rather than quoted from memory.",
+      "kind": "tooling",
+      "commands": ["pyenv virtualenv 3.12.2 fm001-3.12.2 && pyenv local fm001-3.12.2 && pip install pypdf", "brew install poppler"],
+      "outcome": "Text extraction and page rendering both available; the memory-map figure was read directly.",
+      "evidence": ["ev-rm0360-figure2"]
+    },
+    {
+      "summary": "First link attempt against the MEMORY-only script.",
+      "kind": "experiment",
+      "commands": ["ld.lld -T linker/stm32f030r8.ld build/main.o -o build/fm001.elf"],
+      "outcome": "Failed: section '.text' will not fit in region 'FLASH': overflowed by 20 bytes.",
+      "evidence": ["ev-link-error"]
+    },
+    {
+      "summary": "Re-ran the link with -Map and read the map file to locate the sections.",
+      "kind": "debugging",
+      "commands": ["ld.lld -T linker/stm32f030r8.ld build/main.o -o build/fm001.elf -Map build/fm001.map"],
+      "outcome": "Map showed .ARM.exidx at 0x08000000 and .text at 0x08010010 — 16 bytes past the end of flash.",
+      "evidence": ["ev-map-file"]
+    },
+    {
+      "summary": "Tested a candidate minimal SECTIONS block in a scratch copy before editing the project script, then applied it and relinked.",
+      "kind": "implementation",
+      "files_changed": ["linker/stm32f030r8.ld"],
+      "outcome": ".text placed at 0x08000000; .ARM.exidx follows contiguously at 0x08000004. One expected warning remains about a missing _start symbol.",
+      "evidence": ["ev-linker-script", "ev-readelf-sections", "ev-commit-sections"]
+    },
+    {
+      "summary": "Examined the resulting ELF: section headers, program headers, symbol table, and the flattened binary.",
+      "kind": "investigation",
+      "commands": ["llvm-readelf -S -l build/fm001.elf", "llvm-readelf -s build/fm001.elf", "llvm-objcopy -O binary build/fm001.elf build/fm001.bin"],
+      "outcome": "Two LOAD segments split by permission; five sections in no segment at all; 66168-byte ELF flattens to a 20-byte binary.",
+      "evidence": ["ev-readelf-segments", "ev-elf-vs-bin", "ev-symtab"]
+    },
+    {
+      "summary": "Recorded the verified findings and their citations in the project's .agent/ context files.",
+      "kind": "documentation",
+      "files_changed": [".agent/discoveries.md", ".agent/status.md", ".agent/open-questions.md", "docs/references.md"],
+      "outcome": "Memory-region question closed; orphan-placement behaviour recorded with map evidence.",
+      "evidence": ["ev-discoveries"]
+    }
+  ],
+
+  "learning": {
+    "questions": [
+      {
+        "question": "Two addresses, one set of bytes. Duplicate copies of these bytes?",
+        "origin": "user",
+        "answered": true,
+        "answer_summary": "No. One physical flash array, reached through two address windows by bus address decoding. No copy is made at boot.",
+        "evidence": ["ev-rm0360-boot-alias"]
+      },
+      {
+        "question": "Why does a 4-byte .text section not fit in a 64 KiB flash region?",
+        "origin": "tooling",
+        "answered": true,
+        "answer_summary": "It was placed at 0x08010010, past the region end. The error reports an end-address overrun, which placement can cause as readily as size.",
+        "evidence": ["ev-map-file", "ev-link-error"]
+      },
+      {
+        "question": "What is the map file, who created it, and how is it used?",
+        "origin": "user",
+        "answered": true,
+        "answer_summary": "The linker writes it only when asked with -Map. It is a diagnostic report of placement decisions, not a build artifact anything consumes.",
+        "evidence": ["ev-map-file"]
+      },
+      {
+        "question": "What do the section headers and program headers in llvm-readelf output mean?",
+        "origin": "user",
+        "answered": true,
+        "answer_summary": "Two views of one file: sections for the toolchain, segments for whatever loads the image. Only ALLOC-flagged content reaches the device.",
+        "evidence": ["ev-readelf-segments", "ev-elf-vs-bin"]
+      }
+    ],
+
+    "concepts": [
+      { "name": "Linker MEMORY regions", "exposure": "applied", "description": "Named address ranges with attributes, declaring what space exists for allocation." },
+      { "name": "SECTIONS output and input sections", "exposure": "applied", "description": "Output section name, input selector such as *(.text*), and region assignment with > FLASH." },
+      { "name": "Orphan section placement", "exposure": "verified_by_experiment", "description": "Sections not named in SECTIONS are positioned by linker heuristics, which may place them outside the intended region.", "evidence": ["ev-map-file", "ev-link-error"] },
+      { "name": "Load segment page alignment", "exposure": "explained", "description": "Sections with different permissions require separate PT_LOAD segments, and a new segment is aligned to the linker's max-page-size.", "notes": "The 0x10000 default was computed from the observed addresses, not confirmed against lld documentation." },
+      { "name": "Boot memory aliasing at 0x00000000", "exposure": "explained", "description": "Main flash is aliased into the boot memory space so the vector table appears at address 0 on a core with no VTOR.", "evidence": ["ev-rm0360-boot-alias"] },
+      { "name": "VMA versus LMA", "exposure": "encountered", "description": "Runtime address versus stored-image address. Identical throughout this session because no .data section exists yet." },
+      { "name": "Thumb bit on function symbols", "exposure": "explained", "description": "Bit 0 set on a function symbol signals Thumb state to BX/BLX; main appears at 0x08000001 while its instructions begin at 0x08000000.", "evidence": ["ev-symtab"] },
+      { "name": "ELF sections versus program headers", "exposure": "explained", "description": "Linking view versus execution view of the same bytes; only ALLOC sections occupy memory on the device.", "evidence": ["ev-readelf-segments", "ev-elf-vs-bin"] },
+      { "name": "Linker map file", "exposure": "applied", "description": "Optional -Map report of placement decisions, including the VMA/LMA pair per section.", "evidence": ["ev-map-file"] }
+    ],
+
+    "observations": [
+      { "statement": "Link failed with: ld.lld: error: section '.text' will not fit in region 'FLASH': overflowed by 20 bytes", "source": "command_output", "evidence": ["ev-link-error"] },
+      { "statement": "Map file showed .ARM.exidx at VMA 0x08000000 size 0x10, and .text at VMA 0x08010010 size 0x4. Flash ends at 0x08010000, so the overrun is 0x14 = 20 bytes.", "source": "command_output", "evidence": ["ev-map-file"] },
+      { "statement": "After adding SECTIONS, llvm-readelf reported .text PROGBITS AX at 0x08000000 size 4, with .ARM.exidx at 0x08000004.", "source": "command_output", "evidence": ["ev-readelf-sections"] },
+      { "statement": "The ELF has two LOAD segments — R E for .text and R for .ARM.exidx — each with Align 0x10000, and lists .comment, .ARM.attributes, .symtab, .shstrtab and .strtab under section-to-segment mapping 'None'.", "source": "command_output", "evidence": ["ev-readelf-segments"] },
+      { "statement": "build/fm001.elf is 66168 bytes; llvm-objcopy -O binary produces a 20-byte build/fm001.bin.", "source": "command_output", "evidence": ["ev-elf-vs-bin"] },
+      { "statement": "Symbol table lists main as FUNC GLOBAL at value 0x08000001 with size 4, and a local mapping symbol $t at 0x08000000.", "source": "command_output", "evidence": ["ev-symtab"] },
+      { "statement": "RM0360 Table 1, STM32F030x8 block: SRAM 0x2000 0000 - 0x2000 1FFF (8 KB); main flash 0x0800 0000 - 0x0800 FFFF (64 KB); 0x0000 0000 - 0x0000 FFFF (64 KB) 'Main flash memory, system memory or SRAM depending on BOOT configuration'.", "source": "document", "evidence": ["ev-rm0360-table1"] },
+      { "statement": "RM0360 states: 'the main flash memory is aliased in the boot memory space (0x0000 0000), but still accessible from its original memory space (0x0800 0000)' and that the CPU fetches the top-of-stack value from 0x0000 0000 then starts execution from 0x0000 0004.", "source": "document", "evidence": ["ev-rm0360-boot-alias"] },
+      { "statement": "DS9773 Table 2 gives Flash (Kbytes) = 64 in the STM32F030R8 column; page 1 lists STM32F030x8 as covering STM32F030C8 and STM32F030R8.", "source": "document", "evidence": ["ev-ds9773-table2"] },
+      { "statement": "RM0360 Figure 2 shows the Armv6-M address space as eight 512 MB blocks, with the CODE block expanded to show the boot alias at 0x0000 0000 and main flash at 0x0800 0000 as separate boxes.", "source": "document", "evidence": ["ev-rm0360-figure2"] }
+    ],
+
+    "model_updates": [
+      {
+        "topic": "What boot-memory aliasing physically means",
+        "prior_model": "Uncertain whether the same bytes appearing at 0x00000000 and 0x08000000 meant two stored copies. Asked verbatim: 'Two addresses, one set of bytes. Duplicate copies of these bytes?'",
+        "prior_model_provenance": "explicit",
+        "observation": "RM0360 describes the flash as aliased into the boot memory space while still accessible from its original space, and the memory-map figure draws the boot region as a box whose contents depend on BOOT configuration rather than as its own memory.",
+        "updated_model": "One physical flash array is reached through two address windows by bus address decoding. No copy is made and no extra storage is consumed, which is why the linker script declares a region for flash once, at its real address, and none for the alias.",
+        "evidence": ["ev-rm0360-boot-alias", "ev-rm0360-figure2", "ev-rm0360-table1"],
+        "confidence": "high",
+        "still_uncertain": "That no copy occurs has been read in documentation but not demonstrated on hardware."
+      }
+    ],
+
+    "unresolved_questions": [
+      { "question": "Does ld.lld place orphan sections deterministically across versions, and does GNU ld order them the same way?", "why_it_matters": "A layout that depends on heuristics is fragile; a toolchain upgrade could silently move sections.", "blocked_on": "No GNU Arm toolchain installed on this host; not tested against a second linker or version.", "evidence": ["ev-map-file"] },
+      { "question": "Should .ARM.exidx be kept, placed explicitly, or discarded for a freestanding C build?", "why_it_matters": "It consumes flash, and it currently relies on orphan placement rather than an explicit rule.", "blocked_on": "Requires deciding whether any unwinding support is wanted." },
+      { "question": "Is lld's default max-page-size on this target actually 0x10000?", "why_it_matters": "It is the stated cause of the placement failure, but was computed from observed addresses rather than read from documentation.", "blocked_on": "Not yet checked against lld documentation or tested with an explicit max-page-size." },
+      { "question": "What are the MEM_MODE[1:0] bit encodings, and what does the vector table need to contain?", "why_it_matters": "Both are needed before the image can boot; the current ELF starts flash with instructions rather than a stack pointer.", "blocked_on": "Not yet transcribed from RM0360 and PM0215.", "evidence": ["ev-rm0360-memmode"] }
+    ]
+  },
+
+  "experiments": [
+    {
+      "id": "exp-memory-only-link",
+      "question": "With MEMORY declared but no SECTIONS, does the linker place .text into the FLASH region?",
+      "method": "Link one object file against the MEMORY-only script and inspect the generated map file.",
+      "commands": ["ld.lld -T linker/stm32f030r8.ld build/main.o -o build/fm001.elf -Map build/fm001.map"],
+      "predicted_result": "No prediction was committed to. The agent explicitly declined to assert whether lld would place .text at 0x08000000, at 0x0, or refuse to link, and framed it as something to verify rather than assume.",
+      "observed_result": "The link failed. .ARM.exidx was placed at 0x08000000 and .text at 0x08010010, outside the FLASH region.",
+      "conclusion": "Region attributes influence which region is selected but do not guarantee a usable address. Explicit placement is required.",
+      "status": "completed",
+      "evidence": ["ev-link-error", "ev-map-file"]
+    },
+    {
+      "id": "exp-minimal-sections",
+      "question": "Is naming .text alone in a SECTIONS block sufficient to fix the placement, without discarding .ARM.exidx or passing linker flags?",
+      "method": "Write the candidate script to a scratch file, link against it, and check the resulting addresses before editing the project script.",
+      "commands": ["ld.lld -T <scratch>/v1.ld build/main.o -o <scratch>/v1.elf -Map <scratch>/v1.map"],
+      "observed_result": ".text landed at 0x08000000 and the .ARM.exidx orphan followed contiguously at 0x08000004, with no 64 KiB alignment jump.",
+      "conclusion": "One named section is enough: it anchors the region start and subsequent orphans are placed after it rather than in a freshly aligned segment.",
+      "status": "completed",
+      "evidence": ["ev-linker-script", "ev-readelf-sections"]
+    }
+  ],
+
+  "failures": [
+    {
+      "id": "fail-flash-overflow",
+      "observed": "ld.lld: error: section '.text' will not fit in region 'FLASH': overflowed by 20 bytes",
+      "hypotheses": [
+        { "statement": "The code is larger than the 64 KiB flash region.", "status": "rejected", "reason": "llvm-readelf reported .text in build/main.o as 4 bytes." },
+        { "statement": "The region LENGTH was miscalculated, e.g. 64K not meaning 65536.", "status": "rejected", "reason": "The map showed placement above 0x08010000, consistent with a correctly sized 64 KiB region." },
+        { "statement": "The section was placed outside the region rather than being too large for it.", "status": "supported", "reason": "Map file showed .text at 0x08010010, 16 bytes past the region end at 0x08010000." }
+      ],
+      "diagnostics": [
+        "Checked the size of .text in build/main.o with llvm-readelf -S.",
+        "Re-ran the link with -Map to obtain placement addresses.",
+        "Compared the reported .text address against ORIGIN + LENGTH of FLASH."
+      ],
+      "root_cause": "With no SECTIONS block every input section was an orphan. The read-only .ARM.exidx was placed first at the region origin; .text has different permissions and so required a new load segment, which was aligned to lld's default max-page-size of 0x10000 — exactly the end of a 64 KiB region.",
+      "resolution": "Added a SECTIONS block naming .text and assigning it to FLASH, which anchors it at the region origin and removes it from orphan handling.",
+      "resolved": true,
+      "evidence": ["ev-link-error", "ev-map-file", "ev-commit-sections"],
+      "pedagogical_value": "The error text names size while the cause is placement. A learner who trusts the message will try to shrink code that is already 4 bytes. It teaches reading the map file before believing the diagnostic."
+    }
+  ],
+
+  "claims": [
+    { "id": "claim-memory-boundaries", "statement": "On the STM32F030R8, main flash occupies 0x08000000-0x0800FFFF (64 KiB) and SRAM occupies 0x20000000-0x20001FFF (8 KiB).", "status": "observed", "confidence": "high", "evidence": ["ev-rm0360-table1", "ev-ds9773-table2"] },
+    { "id": "claim-placement-not-size", "statement": "The region overflow was caused by section placement, not by section size.", "status": "observed", "confidence": "high", "evidence": ["ev-link-error", "ev-map-file"] },
+    { "id": "claim-alias-not-copy", "statement": "The bytes visible at 0x00000000 and 0x08000000 are one physical flash array reached through two address windows, not two stored copies.", "status": "inferred", "confidence": "high", "evidence": ["ev-rm0360-boot-alias", "ev-rm0360-figure2"], "verification_required": "Map SRAM to 0x00000000 via MEM_MODE, write a word at 0x20000000, and read the same value back at 0x00000000." },
+    { "id": "claim-page-align-default", "statement": "lld's default max-page-size of 0x10000 on this target produced the 64 KiB placement jump.", "status": "inferred", "confidence": "medium", "evidence": ["ev-map-file"], "verification_required": "Confirm the default in lld documentation, or re-link with an explicit max-page-size and observe whether .text moves." },
+    { "id": "claim-not-bootable", "statement": "build/fm001.elf cannot boot: the first words of flash are main's instructions rather than an initial stack pointer and reset vector.", "status": "inferred", "confidence": "high", "evidence": ["ev-readelf-sections", "ev-symtab"], "verification_required": "Inspect the first eight bytes of build/fm001.bin, or flash the image and observe the fault." },
+    { "id": "claim-lld-viable", "statement": "ld.lld accepts GNU-style MEMORY/SECTIONS syntax and produces an ARM ELF for this target.", "status": "observed", "confidence": "high", "evidence": ["ev-readelf-sections", "ev-commit-sections"] }
+  ],
+
+  "evidence": [
+    { "id": "ev-linker-script", "type": "linker_script", "persistence": "committed", "ref": "linker/stm32f030r8.ld", "description": "Project linker script: MEMORY block plus a minimal SECTIONS block placing .text in FLASH." },
+    { "id": "ev-script-pre-fix", "type": "commit", "persistence": "committed", "ref": "2a43fe8", "description": "State of linker/stm32f030r8.ld with MEMORY only and no SECTIONS block; the version that fails to link." },
+    { "id": "ev-commit-sections", "type": "commit", "persistence": "committed", "ref": "42c16bc", "description": "Commit adding the SECTIONS block that fixes the placement." },
+    { "id": "ev-link-error", "type": "command_output", "persistence": "reproducible", "ref": "ld.lld -T linker/stm32f030r8.ld build/main.o -o build/fm001.elf", "description": "Region overflow error, quoted in full in the failure record. Reproducible by checking out the script as of commit 2a43fe8.", "location": "single-line stderr" },
+    { "id": "ev-map-file", "type": "map_file", "persistence": "ephemeral", "ref": "build/fm001.map", "description": "Linker map from the failing link. build/ is gitignored, so the decisive addresses are quoted into the observations rather than relying on this file.", "location": "first six lines" },
+    { "id": "ev-readelf-sections", "type": "command_output", "persistence": "reproducible", "ref": "llvm-readelf -S build/fm001.elf", "description": "Section headers after the SECTIONS fix." },
+    { "id": "ev-readelf-segments", "type": "command_output", "persistence": "reproducible", "ref": "llvm-readelf -l build/fm001.elf", "description": "Program headers and section-to-segment mapping." },
+    { "id": "ev-symtab", "type": "command_output", "persistence": "reproducible", "ref": "llvm-readelf -s build/fm001.elf", "description": "Symbol table showing main at 0x08000001 and the $t mapping symbol." },
+    { "id": "ev-elf-vs-bin", "type": "command_output", "persistence": "reproducible", "ref": "llvm-objcopy -O binary build/fm001.elf build/fm001.bin && ls -l build/fm001.elf build/fm001.bin", "description": "66168-byte ELF versus 20-byte flat binary." },
+    { "id": "ev-rm0360-table1", "type": "datasheet", "persistence": "external", "ref": "RM0360 (docs/references/rm0360-...pdf, gitignored local copy)", "revision": "Rev 5", "location": "Table 1, STM32F030x8 block, page 39/775", "description": "Memory boundary addresses for the x8 variant." },
+    { "id": "ev-rm0360-boot-alias", "type": "datasheet", "persistence": "external", "ref": "RM0360", "revision": "Rev 5", "location": "page 44/775", "description": "Boot configuration text describing flash aliasing and the reset fetch sequence." },
+    { "id": "ev-rm0360-figure2", "type": "datasheet", "persistence": "external", "ref": "RM0360", "revision": "Rev 5", "location": "Section 2.2.2, Figure 2 'Memory map', page 38/775", "description": "Armv6-M address space with the CODE block expanded." },
+    { "id": "ev-rm0360-memmode", "type": "datasheet", "persistence": "external", "ref": "RM0360", "revision": "Rev 5", "location": "SYSCFG_CFGR1 register, MEM_MODE[1:0], page 144/775", "description": "Runtime memory remap control; bit encodings not yet transcribed." },
+    { "id": "ev-ds9773-table2", "type": "datasheet", "persistence": "external", "ref": "DS9773 (docs/references/DS_stm32f030r8.pdf, gitignored local copy)", "revision": "Rev 5", "location": "Table 2, page 10/93, and device summary page 1", "description": "Per-device flash size and confirmation that STM32F030R8 is an x8 part." },
+    { "id": "ev-discoveries", "type": "file", "persistence": "committed", "ref": ".agent/discoveries.md", "description": "Project discovery records written during this session, with the same citations." }
+  ],
+
+  "future_work": {
+    "experiments": [
+      { "idea": "Link the same object with GNU ld and compare orphan ordering and segment alignment.", "rationale": "Establishes whether the observed layout is lld-specific or general.", "prerequisites": ["A GNU Arm embedded toolchain installed"] },
+      { "idea": "Re-link with an explicit max-page-size and observe whether .text moves.", "rationale": "Would convert claim-page-align-default from inferred to observed." },
+      { "idea": "Map SRAM to 0x00000000 via MEM_MODE, write a word at 0x20000000, read it back at 0x00000000.", "rationale": "Demonstrates aliasing on hardware rather than by documentation; would settle claim-alias-not-copy.", "prerequisites": ["A bootable image", "SWD debugger session"] },
+      { "idea": "Dump the first eight bytes of build/fm001.bin and compare against what a vector table must contain.", "rationale": "Makes concrete why a successful link is not a bootable image." }
+    ],
+    "course_topics": [
+      { "topic": "Reading a linker map file to diagnose placement", "rationale": "The failure was not diagnosable from the error text alone.", "level": "foundation", "related_concepts": ["Orphan section placement", "VMA versus LMA"] },
+      { "topic": "ELF sections versus program headers, and what actually reaches the device", "rationale": "The 66168-byte ELF versus 20-byte binary comparison makes the distinction concrete in one command.", "level": "foundation" },
+      { "topic": "Why a successful link does not imply a bootable image", "rationale": "Separates toolchain correctness from hardware correctness.", "level": "foundation" },
+      { "topic": "Address aliasing and why a linker script declares memory once", "rationale": "Connects a bus-fabric detail to a concrete linker-script decision.", "level": "foundation", "related_concepts": ["Boot memory aliasing at 0x00000000"] }
+    ],
+    "exercises": [
+      { "exercise": "Give the learner a MEMORY-only script and the failing link; ask them to explain why 4 bytes will not fit in 64 KiB.", "rationale": "Forces map-file reading rather than trusting the error text.", "verification": "Learner identifies the 0x10000 alignment jump without being told about segments." },
+      { "exercise": "Ask the learner to predict, before running it, what llvm-objcopy -O binary will produce from a 66 KB ELF.", "rationale": "Tests whether the ALLOC flag has actually been understood.", "verification": "Learner predicts a size close to the sum of allocated sections and can say which sections are excluded." }
+    ],
+    "useful_failures": [
+      { "failure_id": "fail-flash-overflow", "why_useful": "The diagnostic message actively misleads by naming size when the cause is placement, which makes it a good exercise in not trusting error text." }
+    ],
+    "likely_misconceptions": [
+      { "misconception": "A MEMORY region positions sections at its ORIGIN.", "why_likely": "The syntax names an ORIGIN, which reads as an instruction to place things there." },
+      { "misconception": "A 'will not fit in region' error always means the code is too big.", "why_likely": "The wording states size and gives no hint that placement can cause the same message." },
+      { "misconception": "Memory aliased at two addresses means two copies of the data exist.", "why_likely": "Two addresses intuitively suggest two things; the bus-decoding mechanism is invisible from software." },
+      { "misconception": "The entry point recorded in the ELF header is what makes the chip start executing.", "why_likely": "It is called the entry point, and hosted systems do use it; on Cortex-M the reset vector is what matters." }
+    ],
+    "useful_artifacts": [
+      { "evidence_id": "ev-map-file", "why_useful": "A map file short enough that the misplacement is visible in six lines is a better teaching artifact than a realistic one." },
+      { "evidence_id": "ev-rm0360-figure2", "why_useful": "One figure showing the alias and the real flash as separate boxes inside the same CODE block explains in a picture what takes several paragraphs in prose." }
+    ],
+    "prerequisites": [
+      { "concept": "SECTIONS placement", "requires": ["Linker MEMORY regions", "Output versus input sections"], "noticed_how": "The fix was only meaningful once the difference between declaring a range and placing content into it was clear." },
+      { "concept": "Startup code and .data initialisation", "requires": ["VMA versus LMA"], "noticed_how": "The two address columns in the map file have no visible purpose until a section exists whose load and run addresses differ." },
+      { "concept": "Vector table layout", "requires": ["Boot memory aliasing at 0x00000000", "Thumb bit on function symbols"], "noticed_how": "Both came up as prerequisites while explaining why the current image cannot boot." }
+    ]
+  },
+
+  "notes": "Learning-first session: the linker script was built incrementally by deliberate choice, so the MEMORY-only script was a teaching step rather than an attempted solution. No hardware was involved and nothing was flashed."
+}
