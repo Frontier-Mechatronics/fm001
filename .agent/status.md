@@ -6,7 +6,7 @@ Foundation and bring-up preparation.
 
 ## Current Objective
 
-Verify the STM32F030R8 memory layout from authoritative documentation, then create the first project-owned linker script and linked executable ELF.
+Build up the first project-owned linker script one deliberate step at a time, then produce a linked executable ELF and inspect its layout.
 
 ## Last Verified State
 
@@ -16,10 +16,19 @@ Verify the STM32F030R8 memory layout from authoritative documentation, then crea
 - LLVM objdump confirmed Thumb code in the generated object.
 - OpenOCD 0.12.0 connected through the onboard ST-LINK over SWD and detected `Cortex-M0 r0p0`.
 - The ST-LINK target-voltage reading during that test was approximately 3.25 V.
+- STM32F030R8T6 Flash and SRAM base addresses and sizes were confirmed against RM0360 Rev 5 and DS9773 Rev 5.
+  See `discoveries.md` for the evidence and its limitations.
+- `linker/stm32f030r8.ld` exists and declares only a `MEMORY` block. It has not yet been used in a link,
+  so nothing about its effect on section placement has been observed.
 
 ## Next Intended Step
 
-Read the applicable STM32 datasheet and RM0360 memory-map, boot, and vector information; define the Flash and SRAM regions for the first linker script; then link a minimal executable ELF. Do not implement this step without separately reviewing the relevant primary documentation.
+Link `build/main.o` using `ld.lld -T linker/stm32f030r8.ld` and inspect the resulting ELF with `llvm-readelf -S -l`.
+
+The specific question this answers: with a script that supplies `MEMORY` but no `SECTIONS`, does the linker place
+`.text` into the FLASH region by orphan-section attribute matching, place it elsewhere, or refuse to link? This is
+also the first real evidence toward the open question of which linker FM001 uses. Record the observed behaviour
+rather than assuming it.
 
 ## Current Toolchain
 
@@ -30,6 +39,9 @@ Read the applicable STM32 datasheet and RM0360 memory-map, boot, and vector info
 - Linker: Not yet selected or verified. `ld.lld` is installed; no GNU Arm embedded toolchain (`arm-none-eabi-*`) is present on this host. See `discoveries.md`.
 - Debug server: OpenOCD 0.12.0.
 - Debug transport: Onboard ST-LINK over SWD.
+- Documentation tooling: pyenv virtualenv `fm001-3.12.2` (selected by `.python-version`) with `pypdf` for text
+  extraction, and Homebrew poppler 26.08.0 (`pdftotext`, `pdftoppm`) for text and page rendering of the vendor
+  PDFs in `docs/references/`.
 
 ## Known Working Commands
 
@@ -49,13 +61,16 @@ clang \
 - `build/`: generated local objects; ignored by Git.
 - `docs/project-001-spec.md`: project specification.
 - `docs/references.md`: authoritative-reference metadata.
-- `linker/`: present but empty; intended home for the first project-owned linker script.
-- `build.zig`: present at the repository root but empty (0 bytes). It is a leftover of the completed Zig experiment, not current build direction.
-- No project-owned startup source, linker script, executable ELF, Makefile, or CI configuration has been observed.
-- Only `.gitignore`, `LICENSE`, `README.md`, and `docs/project-001-spec.md` are tracked by Git. `AGENTS.md`, `.agent/`, `src/`, `docs/references.md`, and `docs/notes/` are untracked working-tree files.
+- `linker/stm32f030r8.ld`: project-owned linker script. Currently declares only the `MEMORY` block, with `FLASH (rx)`
+  at `0x08000000` for 64K and `SRAM (rwx)` at `0x20000000` for 8K. No `ENTRY`, no `SECTIONS`, no symbol definitions yet.
+- `docs/references/`: local vendor PDFs; excluded from Git.
+- `build.zig` is no longer present at the repository root.
+- No project-owned startup source, executable ELF, Makefile, or CI configuration has been observed.
+- Tracked by Git: `.agent/`, `AGENTS.md`, `.gitignore`, `LICENSE`, `README.md`, `docs/notes/20260821.md`,
+  `docs/project-001-spec.md`, `docs/references.md`, and `src/main.c`. `linker/` is untracked.
 
 ## Known Documentation Discrepancies
 
 Current, unresolved inconsistencies between documents. Resolve and remove these rather than working around them.
 
-- The `MB1136-DEFAULT-C04` board schematic is listed in `docs/references.md`, but no local copy has been confirmed. Obtain it before making board-net claims about headers, LED, UART routing, ST-LINK, power, or solder bridges.
+None currently recorded.

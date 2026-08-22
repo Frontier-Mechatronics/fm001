@@ -9,7 +9,6 @@ Keep only unresolved questions here. When one is resolved, remove it and record 
 
 ## Memory and Clocking
 
-- What exact Flash and SRAM regions should the first linker script define, as verified from the applicable STM32 documentation?
 - What initial system-clock configuration will the firmware use?
 
 ## Debugging

@@ -52,7 +52,7 @@
 - Official URL: https://www.st.com/resource/en/schematic_pack/mb1136-default-c04_schematic.pdf
 - Primary use in FM001: Definitive board net connectivity.
 - Key sections: MCU, ST-LINK, power, connector, LED, UART, and solder-bridge sheets.
-- Local copy: Pending acquisition.
+- Local copy: `docs/references/mb1136-default-c04_schematic.pdf`; present locally and excluded from Git.
 
 ## STM32F030x4/x6/x8/xC device errata
 
